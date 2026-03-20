@@ -764,12 +764,39 @@ def _try_parse(text: str) -> Optional[dict]:
         return None
 
 def _extract_json_object(text: str) -> str:
-    """Slice from first { to last } — strips leading/trailing prose."""
+    """
+    Slice from first { to last } to strip leading/trailing prose.
+
+    Two guards prevent over-aggressive trimming:
+
+    1. Structural truncation guard: if there is meaningful content AFTER
+       the last } (more than a few chars of whitespace/prose punctuation),
+       the last } is an interior close brace, not the root close — the
+       stream is still mid-structure. Return raw text so truncation repair
+       sees the full incomplete stream.
+
+    2. Volume guard: only trim if we keep at least 60% of the original —
+       prevents clipping when the last } belongs to an inner turn.
+    """
     start = text.find("{")
-    end   = text.rfind("}") + 1
-    if start == -1 or end <= start:
+    last_close = text.rfind("}")
+
+    if start == -1 or last_close == -1 or last_close <= start:
         return text
-    return text[start:end]
+
+    after_close = text[last_close + 1:]
+
+    # If there is meaningful content after the last } the stream is
+    # mid-structure — don't extract, let truncation repair handle it
+    # "Meaningful" = more than trailing whitespace or simple prose punctuation
+    after_stripped = after_close.strip()
+    if len(after_stripped) > 3 and not re.match(r'^[\w\s!?.,:;]*$', after_stripped):
+        return text
+
+    extracted = text[start:last_close + 1]
+    if len(extracted) < len(text) * 0.6:
+        return text
+    return extracted
 
 def _repair_truncated(text: str) -> Optional[dict]:
     """
@@ -778,6 +805,7 @@ def _repair_truncated(text: str) -> Optional[dict]:
     """
     suffixes = [
         ']}',        # cut after last complete turn
+        '}]}',       # cut after closed string, still inside turn object
         '"]}',       # cut mid-string, object already closed
         '"}]}',      # cut mid-string inside a turn content field
         '..."}]}',   # same, with ellipsis to signal truncation
@@ -793,23 +821,130 @@ def _repair_truncated(text: str) -> Optional[dict]:
 
 def _repair_single_quotes(text: str) -> Optional[dict]:
     """Swap unescaped single quotes to double quotes (model used Python dict syntax)."""
-    # Only attempt if text looks like it uses single quotes for keys
     if '": ' in text or '":' in text:
         return None  # already double-quoted, don't mangle
     swapped = text.replace("'", '"')
     return _try_parse(swapped)
 
+
+def _repair_trailing_comma(text: str) -> Optional[dict]:
+    """
+    Remove trailing commas before ] or } — JavaScript habit, invalid JSON.
+    Handles:
+      [..., "last item",]
+      {..., "key": "val",}
+      also the truncation variant: content ends with ,"  before closing
+    """
+    # Remove trailing commas before closing bracket/brace
+    fixed = re.sub(r",\s*([}\]])", r"\1", text)
+    # Also handle trailing comma+quote patterns from truncated strings
+    # e.g.  "content": "some text,"  }  →  "content": "some text"  }
+    fixed = re.sub(r',"\s*([}\]])', r'"\1', fixed)
+    if fixed != text:
+        return _try_parse(fixed)
+    return None
+
+
+def _repair_mixed_escaping(text: str) -> Optional[dict]:
+    """
+    Fix partially-escaped JSON where some delimiters are \" and others are
+    raw ".  This happens when the model starts with escaped quotes then
+    switches style mid-output.
+
+    Strategy: if straight parse fails and the text contains both \" and
+    unescaped-quote patterns, try normalising all string boundaries to use
+    unescaped quotes by decoding the \" sequences first, then re-encoding
+    only the interior ones via the unescaped-inner-quotes repair.
+    """
+    if '\\"' not in text:
+        return None   # no mixed escaping present
+
+    # Decode all \" → " then re-run the unescaped inner quotes repair
+    decoded = text.replace('\\"', '"')
+    result  = _try_parse(decoded)
+    if result:
+        return result
+
+    # Also try stripping the outer wrapper that sometimes appears when the
+    # model double-encodes the whole payload as a JSON string
+    if decoded.startswith('"') and decoded.endswith('"'):
+        inner = decoded[1:-1]
+        result = _try_parse(inner)
+        if result:
+            return result
+
+    return _repair_unescaped_inner_quotes(decoded)
+
+
+def _repair_missing_turn_close(text: str) -> Optional[dict]:
+    """
+    Fix turn objects missing their closing brace and/or comma, e.g.:
+      {"role":"user","content":"text"}{"role":"assistant",...}  ← missing comma
+      {"role":"user","content":"text"{"role":"assistant",...}   ← missing } and comma
+
+    Two passes:
+      1. Inject missing comma between adjacent turn objects: }{ → },{
+      2. Inject missing } before turn openers where content isn't closed
+    """
+    # Pass 1: missing comma between objects (}{ → ,{)
+    fixed = re.sub(r'\}\s*(\{"(?:role|content)")', r'},\1', text)
+
+    # Pass 2: missing close brace before a new turn opener
+    fixed = re.sub(
+        r'("content"\s*:\s*"(?:[^"\\]|\\.)*")\s*,?\s*(\{"role")',
+        r'\1},\2',
+        fixed,
+    )
+
+    if fixed != text:
+        r = _try_parse(fixed)
+        if r:
+            return r
+        return _repair_truncated(fixed)
+    return None
+
+
 def _repair_unescaped_inner_quotes(text: str) -> Optional[dict]:
     """
     Fix: "content": "She said "hello" to him"
-    Strategy: use regex to find string values that contain unescaped quotes
-    and escape them.  Imperfect but catches the common case.
+    Escapes unescaped double quotes found inside content/role string values.
     """
-    # Replace inner unescaped double quotes inside JSON string values
-    # Pattern: after ": " find the string, escape any " that isn't \\" or end-of-value
+    fixed = re.sub(
+        r'("(?:content|role)"\s*:\s*")(.*?)("(?:\s*[,}\]]))',
+        lambda m: m.group(1) + m.group(2).replace('"', '\\"') + m.group(3),
+        text,
+        flags=re.DOTALL,
+    )
+    if fixed != text:
+        return _try_parse(fixed)
+    return None
+
+
+def _repair_embedded_json_in_content(text: str) -> Optional[dict]:
+    """
+    Fix content strings that contain unescaped JSON objects, e.g.:
+      "content": "Here is code: {"key": "value"} try it"
+
+    The model embedded a JSON object literal inside a string value without
+    escaping the inner braces/quotes.  We escape the inner quotes so the
+    outer JSON parses correctly.
+
+    This is a targeted version of _repair_unescaped_inner_quotes that also
+    handles the brace characters by working on the raw text between the
+    content field opener and the next structural comma/brace.
+    """
+    # Find content values and escape any unescaped { } inside them
+    def _escape_content(m: re.Match) -> str:
+        prefix  = m.group(1)   # "content": "
+        body    = m.group(2)   # the inner text
+        suffix  = m.group(3)   # closing "  followed by , or }
+        # Escape inner double-quotes that aren't already escaped
+        escaped = re.sub(r'(?<!\\)"', '\\"', body)
+        return prefix + escaped + suffix
+
     fixed = re.sub(
         r'("content"\s*:\s*")(.*?)("(?:\s*[,}\]]))',
-        lambda m: m.group(1) + m.group(2).replace('"', '\\"') + m.group(3),
+        _escape_content,
         text,
         flags=re.DOTALL,
     )
@@ -886,22 +1021,16 @@ def _repair_fused_turns(text: str) -> Optional[dict]:
     """
     Fixes the most common small-model structural failure: two turns fused
     into one JSON object with duplicate keys, e.g.:
-
       {"role":"user","content":"...","role":"assistant","content":"..."}
 
-    json.loads silently keeps only the last value for each duplicate key,
-    so the user turn is lost entirely before we even see the parsed result.
-
-    Fix: use object_pairs_hook to capture ALL key-value pairs including
-    duplicates.  Inner objects are delivered to the hook before the root,
-    so all entries that contain a "role" key are turn objects.  We expand
-    any fused ones (duplicate role/content) into separate turns.
+    Uses object_pairs_hook to capture ALL key-value pairs before dedup.
+    Inner objects arrive depth-first so all "role"-keyed entries are turns.
     """
     pairs_log: list = []
 
     def _hook(pairs: list) -> dict:
         pairs_log.append(pairs)
-        return dict(pairs)   # normal collapsed dict for nesting to work
+        return dict(pairs)
 
     try:
         root = json.loads(text, object_pairs_hook=_hook)
@@ -911,23 +1040,17 @@ def _repair_fused_turns(text: str) -> Optional[dict]:
     if not pairs_log:
         return None
 
-    # Collect turn objects: any pairs entry that has a "role" key.
-    # These arrive in document order (depth-first), which is the turn order.
     fixed_turns: list = []
     for pairs in pairs_log:
         keys = [k for k, _ in pairs]
         if "role" not in keys:
-            continue   # not a turn object (e.g. the root object)
-
+            continue
         role_vals    = [v for k, v in pairs if k == "role"]
         content_vals = [v for k, v in pairs if k == "content"]
-
         if len(role_vals) >= 2 and len(content_vals) >= 2:
-            # Fused: expand each role/content pair into its own turn
             for role, content in zip(role_vals, content_vals):
                 fixed_turns.append({"role": role, "content": content})
         else:
-            # Normal single turn
             role    = role_vals[0]    if role_vals    else ""
             content = content_vals[0] if content_vals else ""
             fixed_turns.append({"role": role, "content": content})
@@ -935,32 +1058,15 @@ def _repair_fused_turns(text: str) -> Optional[dict]:
     if len(fixed_turns) < 2:
         return None
 
-    # Preserve top-level metadata (category, topic, etc.) from root
     result = {k: v for k, v in root.items() if k != "turns"}
     result["turns"] = fixed_turns
     return result
-    """
-    Some models wrap turns inside an extra key:
-    {"conversation": {"turns": [...]}} or {"dialogue": {"turns": [...]}}
-    Unwrap one level if top-level has no "turns" key.
-    """
-    if "turns" in data:
-        return data
-    for val in data.values():
-        if isinstance(val, dict) and "turns" in val:
-            return val
-        if isinstance(val, list):
-            # Maybe the list IS the turns array
-            data["turns"] = val
-            return data
-    return data
 
 
 def _unwrap_nested(data: dict) -> dict:
     """
-    Some models wrap turns in an extra key:
-    {"conversation": {"turns": [...]}} or {"dialogue": {"turns": [...]}}
-    Unwrap one level if top-level has no "turns" key.
+    Unwrap {"conversation": {"turns": [...]}} or {"dialogue": {"turns": [...]}}
+    one level if top-level has no "turns" key.
     """
     if "turns" in data:
         return data
@@ -971,60 +1077,105 @@ def _unwrap_nested(data: dict) -> dict:
             data["turns"] = val
             return data
     return data
+
+
+def _repair_outer_wrapper(text: str) -> Optional[dict]:
+    """
+    Fix: { {"turns":[...]} }
+    Some models wrap the whole payload in an extra set of braces.
+    Uses bracket depth tracking to find the inner object correctly
+    rather than rfind which grabs the wrong closing brace.
+    """
+    depth = 0
+    start = None
+    for i, ch in enumerate(text):
+        if ch == "{":
+            depth += 1
+            if depth == 2:
+                start = i
+        elif ch == "}":
+            depth -= 1
+            if depth == 1 and start is not None:
+                inner = text[start:i + 1]
+                d = _try_parse(inner)
+                if d and "turns" in d:
+                    return d
+                start = None
+    return None
 
 
 def repair_and_parse(raw: str) -> Optional[dict]:
     """
     Full repair pipeline. Returns a dict with a valid "turns" list or None.
-    Logs what repair was needed at DEBUG level.
+
+    Steps (applied in order, stops at first successful parse):
+      1.  Strip markdown fences, extract outermost JSON object
+      2.  Straight json.loads
+      3.  Trailing comma removal  (JS habit: [...,] or {...,})
+      4.  Single-quote coercion   (Python dict style)
+      5.  Mixed escaping fix      (partial \" sequences)
+      6.  Missing turn-close brace (with or without preceding comma)
+      7.  Truncation repair       (hit max_tokens mid-output)
+      8.  Unescaped inner quotes  (content contains raw ")
+      9.  Embedded JSON in content (unescaped {} inside strings)
+      10. Outer wrapper           ({ {"turns":[...]} })
+      Post-parse:
+      11. Fused-turn expansion    (duplicate role/content keys)
+      12. Nested wrapper unwrap   ({"conversation":{"turns":[...]}})
+      13. Turn validation + alternation fix
     """
-    # Step 1: strip fences and extract JSON object
     text = _FENCE.sub("", raw.strip())
     text = _extract_json_object(text)
-
     if not text:
         return None
 
-    # Step 2: straight parse
     data = _try_parse(text)
 
-    # Step 3: single-quote repair
+    if data is None:
+        data = _repair_trailing_comma(text)
+        if data: log.debug("repair: trailing comma")
+
     if data is None:
         data = _repair_single_quotes(text)
-        if data:
-            log.debug("repair: single quotes")
+        if data: log.debug("repair: single quotes")
 
-    # Step 4: truncation repair
+    if data is None:
+        data = _repair_mixed_escaping(text)
+        if data: log.debug("repair: mixed escaping")
+
     if data is None:
         data = _repair_truncated(text)
-        if data:
-            log.debug("repair: truncated JSON")
+        if data: log.debug("repair: truncated JSON")
 
-    # Step 5: unescaped inner quotes
+    if data is None:
+        data = _repair_missing_turn_close(text)
+        if data: log.debug("repair: missing turn close brace")
+
     if data is None:
         data = _repair_unescaped_inner_quotes(text)
-        if data:
-            log.debug("repair: unescaped quotes")
+        if data: log.debug("repair: unescaped inner quotes")
+
+    if data is None:
+        data = _repair_embedded_json_in_content(text)
+        if data: log.debug("repair: embedded JSON in content")
+
+    if data is None:
+        data = _repair_outer_wrapper(text)
+        if data: log.debug("repair: outer wrapper")
 
     if data is None:
         return None
 
-    # Step 6: fused turns — split objects where duplicate role/content keys
-    #         indicate two turns were merged into one object
-    turns_before_fuse = data.get("turns")
-    data_fused = _repair_fused_turns(text)
+    # Fused turn expansion — always run, only adopt if it found more turns
+    turns_before = data.get("turns", [])
+    data_fused   = _repair_fused_turns(text)
     if data_fused is not None:
-        fused_turns = data_fused.get("turns", [])
-        # Only adopt the fused repair if it produced more turns than the
-        # straight parse did — that's how we know fusion actually happened
-        if isinstance(turns_before_fuse, list) and len(fused_turns) > len(turns_before_fuse):
+        fused = data_fused.get("turns", [])
+        if isinstance(turns_before, list) and len(fused) > len(turns_before):
             data = data_fused
-            log.debug(f"repair: fused turns ({len(turns_before_fuse)} → {len(fused_turns)})")
+            log.debug(f"repair: fused turns ({len(turns_before)} → {len(fused)})")
 
-    # Step 7: unwrap nested structure
-    data = _unwrap_nested(data)
-
-    # Step 7: validate and fix turns
+    data  = _unwrap_nested(data)
     turns = _validate_and_fix_turns(data.get("turns"))
     if turns is None:
         return None
@@ -1491,19 +1642,19 @@ def main() -> None:
     g.add_argument("--models",             nargs="+", required=True)
     g.add_argument("--count",              type=int,   default=10_000)
     g.add_argument("--rotate-every",       type=int,   default=150)
-    g.add_argument("--output-dir",         type=str,   default="./convos")
+    g.add_argument("--output-dir",         type=str,   default="./output")
     g.add_argument("--categories",         type=str,   default="categories.jsonl")
     g.add_argument("--delay",              type=float, default=0.0)
     g.add_argument("--no-unload-existing", action="store_true")
 
     s = sub.add_parser("stats", help="Print dataset statistics")
-    s.add_argument("--output-dir",  default="./convos")
+    s.add_argument("--output-dir",  default="./output")
     s.add_argument("--categories",  default="categories.jsonl")
     s.add_argument("--verbose",     action="store_true")
     s.add_argument("--show-empty",  action="store_true")
 
     sp = sub.add_parser("sample", help="Print random sample conversations")
-    sp.add_argument("--output-dir",  default="./convos")
+    sp.add_argument("--output-dir",  default="./output")
     sp.add_argument("--categories",  default="categories.jsonl")
     sp.add_argument("--category",    default=None)
     sp.add_argument("--n",           type=int, default=2)
