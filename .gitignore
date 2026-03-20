@@ -1,9 +1,6 @@
 # Generated data — can be gigabytes, never commit
-output/
-convos/
 rust_data/
 rust_forge/
-*.jsonl
 
 # Dedup fingerprint cache
 .hashes/
