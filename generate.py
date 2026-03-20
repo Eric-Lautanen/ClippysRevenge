@@ -774,14 +774,14 @@ def _extract_json_object(text: str) -> str:
 def _repair_truncated(text: str) -> Optional[dict]:
     """
     Try progressively more aggressive closings for truncated JSON.
-    Ordered from least to most invasive.
+    Ordered from least to most invasive — first successful parse wins.
     """
     suffixes = [
-        ']}',               # cut off after last complete turn
-        '"]}',              # cut off mid-string, no open object
-        '"}]}',             # cut off mid-content string inside a turn object
-        '..."}]}',          # same but signals truncation with ellipsis
-        '"}, {"role": "assistant", "content": "..."}]}',  # cut off mid-user-turn
+        ']}',        # cut after last complete turn
+        '"]}',       # cut mid-string, object already closed
+        '"}]}',      # cut mid-string inside a turn content field
+        '..."}]}',   # same, with ellipsis to signal truncation
+        '"}, {"role": "assistant", "content": "..."}]}',  # cut mid-user-turn
         ']}}',
         '}}',
     ]
@@ -882,7 +882,63 @@ def _validate_and_fix_turns(turns: list) -> Optional[list]:
     return merged
 
 
-def _unwrap_nested(data: dict) -> dict:
+def _repair_fused_turns(text: str) -> Optional[dict]:
+    """
+    Fixes the most common small-model structural failure: two turns fused
+    into one JSON object with duplicate keys, e.g.:
+
+      {"role":"user","content":"...","role":"assistant","content":"..."}
+
+    json.loads silently keeps only the last value for each duplicate key,
+    so the user turn is lost entirely before we even see the parsed result.
+
+    Fix: use object_pairs_hook to capture ALL key-value pairs including
+    duplicates.  Inner objects are delivered to the hook before the root,
+    so all entries that contain a "role" key are turn objects.  We expand
+    any fused ones (duplicate role/content) into separate turns.
+    """
+    pairs_log: list = []
+
+    def _hook(pairs: list) -> dict:
+        pairs_log.append(pairs)
+        return dict(pairs)   # normal collapsed dict for nesting to work
+
+    try:
+        root = json.loads(text, object_pairs_hook=_hook)
+    except json.JSONDecodeError:
+        return None
+
+    if not pairs_log:
+        return None
+
+    # Collect turn objects: any pairs entry that has a "role" key.
+    # These arrive in document order (depth-first), which is the turn order.
+    fixed_turns: list = []
+    for pairs in pairs_log:
+        keys = [k for k, _ in pairs]
+        if "role" not in keys:
+            continue   # not a turn object (e.g. the root object)
+
+        role_vals    = [v for k, v in pairs if k == "role"]
+        content_vals = [v for k, v in pairs if k == "content"]
+
+        if len(role_vals) >= 2 and len(content_vals) >= 2:
+            # Fused: expand each role/content pair into its own turn
+            for role, content in zip(role_vals, content_vals):
+                fixed_turns.append({"role": role, "content": content})
+        else:
+            # Normal single turn
+            role    = role_vals[0]    if role_vals    else ""
+            content = content_vals[0] if content_vals else ""
+            fixed_turns.append({"role": role, "content": content})
+
+    if len(fixed_turns) < 2:
+        return None
+
+    # Preserve top-level metadata (category, topic, etc.) from root
+    result = {k: v for k, v in root.items() if k != "turns"}
+    result["turns"] = fixed_turns
+    return result
     """
     Some models wrap turns inside an extra key:
     {"conversation": {"turns": [...]}} or {"dialogue": {"turns": [...]}}
@@ -895,6 +951,23 @@ def _unwrap_nested(data: dict) -> dict:
             return val
         if isinstance(val, list):
             # Maybe the list IS the turns array
+            data["turns"] = val
+            return data
+    return data
+
+
+def _unwrap_nested(data: dict) -> dict:
+    """
+    Some models wrap turns in an extra key:
+    {"conversation": {"turns": [...]}} or {"dialogue": {"turns": [...]}}
+    Unwrap one level if top-level has no "turns" key.
+    """
+    if "turns" in data:
+        return data
+    for val in data.values():
+        if isinstance(val, dict) and "turns" in val:
+            return val
+        if isinstance(val, list):
             data["turns"] = val
             return data
     return data
@@ -936,7 +1009,19 @@ def repair_and_parse(raw: str) -> Optional[dict]:
     if data is None:
         return None
 
-    # Step 6: unwrap nested structure
+    # Step 6: fused turns — split objects where duplicate role/content keys
+    #         indicate two turns were merged into one object
+    turns_before_fuse = data.get("turns")
+    data_fused = _repair_fused_turns(text)
+    if data_fused is not None:
+        fused_turns = data_fused.get("turns", [])
+        # Only adopt the fused repair if it produced more turns than the
+        # straight parse did — that's how we know fusion actually happened
+        if isinstance(turns_before_fuse, list) and len(fused_turns) > len(turns_before_fuse):
+            data = data_fused
+            log.debug(f"repair: fused turns ({len(turns_before_fuse)} → {len(fused_turns)})")
+
+    # Step 7: unwrap nested structure
     data = _unwrap_nested(data)
 
     # Step 7: validate and fix turns
@@ -1113,6 +1198,40 @@ def _end_stream_line() -> None:
 
 
 # ─────────────────────────────────────────────────────────
+#  PARSE FAIL LOGGER
+# ─────────────────────────────────────────────────────────
+
+def _log_parse_fail(output_dir: str, raw: str, cat: dict, attempt: int) -> None:
+    """
+    Append every failed raw response to parse_failures.log so patterns
+    can be reviewed and new repairs added.
+
+    Format:
+    ════ #N  2024-01-01 12:00:00  attempt=1  category=rust_ownership ════
+    <full raw response>
+    ════ END ════
+    """
+    log_path = Path(output_dir) / "parse_failures.log"
+    ts       = time.strftime("%Y-%m-%d %H:%M:%S")
+    sep      = "═" * 72
+
+    try:
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(f"\n{sep}\n")
+            f.write(f"  attempt={attempt}  cat={cat['id']}  {ts}\n")
+            f.write(f"{sep}\n")
+            f.write(raw)
+            f.write(f"\n{sep} END {sep}\n")
+    except Exception as e:
+        log.warning(f"Could not write parse_failures.log: {e}")
+
+    # Also print a short snippet to the terminal so you know it happened
+    snippet = raw[:100].replace("\n", " ")
+    console.print(f"[warn]  ✗ Parse fail (attempt {attempt}) — {snippet}…[/warn]")
+    console.print(f"[dim]    Full output logged to {log_path}[/dim]")
+
+
+# ─────────────────────────────────────────────────────────
 #  GENERATE COMMAND
 # ─────────────────────────────────────────────────────────
 
@@ -1228,8 +1347,7 @@ def generate(args: argparse.Namespace) -> None:
                     break
 
                 stats.parse_fail += 1
-                snippet = raw[:120].replace("\n", " ")
-                console.print(f"[warn]  Parse fail ({attempt+1}/{MAX_RETRIES}) — raw: {snippet}[/warn]")
+                _log_parse_fail(outdir, raw, cat, attempt + 1)
                 first_output[0] = True
                 _think_buf[0]   = ""
 
