@@ -1,4 +1,4 @@
-# ClippysRevenge — Hobbyist LLM Training Pipeline
+# RustMind — Hobbyist LLM Training Pipeline
 
 A complete, from-scratch pipeline for training a small language model on conversational English, biased toward programming and Rust development. Built to run on consumer hardware — no cloud GPUs required.
 
@@ -32,19 +32,21 @@ Fine-tune the Phase 1 model on curated, validated Rust examples: compiler-verifi
 
 ```
 rustmind/
-├── generate.py        # Synthetic conversation generator
-├── scrape.py          # Real Rust data scraper
-├── categories.jsonl   # 100 weighted conversation categories
+├── generate.py          # Synthetic conversation generator
+├── scrape.py            # Real Rust data scraper
+├── categories.jsonl     # 100 weighted conversation categories
+├── requirements.txt
 ├── README.md
 ├── .gitignore
 │
-├── output/            # Generated conversations (gitignored)
+├── output/              # Generated conversations (gitignored)
 │   ├── rust_ownership.jsonl
 │   ├── rust_async.jsonl
 │   ├── casual_chat.jsonl
-│   └── ...            # one file per category
+│   ├── parse_failures.log   # Full raw output of any failed parses
+│   └── ...              # one .jsonl file per category
 │
-└── rust_data/         # Scraped Rust data (gitignored)
+└── rust_data/           # Scraped Rust data (gitignored)
     ├── crates/
     ├── github/
     ├── docs/
@@ -59,9 +61,11 @@ rustmind/
 pip install requests rich
 ```
 
-Python 3.10+ required. No GPU needed for data generation.
+Python 3.10+ required. No GPU needed for data generation — the script calls LM Studio's HTTP API, so all inference runs inside LM Studio.
 
-You also need **LM Studio** running in headless/server mode with at least one model loaded. Any instruction-tuned model works — uncensored models tend to produce more varied training conversations. The script has been tested with Qwen3, Nemotron, and Dolphin variants.
+You also need **LM Studio** with the local server running. Any instruction-tuned model works. Uncensored models tend to produce more varied training conversations. The script has been tested with Qwen3, Nemotron, and Dolphin variants.
+
+> **Note:** You do not need to pre-load a model before running the script. The generator manages loading and unloading models itself via the LM Studio API. You only need the LM Studio server process running.
 
 ---
 
@@ -69,39 +73,46 @@ You also need **LM Studio** running in headless/server mode with at least one mo
 
 ### 1. Start LM Studio server
 
-In LM Studio, go to the Developer tab and start the local server (default port 1234). Or in headless mode:
+**Desktop app:** Go to the Developer tab and toggle the server on (default port 1234).
+
+**Headless / CLI:** If you have the `lms` CLI installed, start the daemon and then the server:
 
 ```bash
-lms server start
+lms daemon up       # start the LM Studio background process
+lms server start    # start the HTTP API server
 ```
 
+The `lms` CLI is installed separately from the desktop app. See the [LM Studio CLI docs](https://lmstudio.ai/docs/cli) for setup. On Windows/macOS with the desktop app already installed, just enabling the server from the Developer tab is the easiest path.
+
 ### 2. Find your model IDs
+
+The script uses the LM Studio v0 REST API to list models. Run this to see all downloaded models and their IDs:
 
 ```bash
 curl http://localhost:1234/api/v0/models
 ```
 
-Copy the exact `id` strings — you'll need them for `--models`.
+Look for the `"id"` field in each model object — that's the exact string to pass to `--models`. Model IDs typically look like `publisher/model-name` or just `model-name` depending on how the model was downloaded.
 
 ### 3. Generate conversations
 
 ```bash
-# Windows PowerShell — all one line
-python generate.py generate --models "publisher/model-name" --count 50000 --rotate-every 200 --output-dir ./output
+# Single model — all one line (required on Windows PowerShell)
+python generate.py generate --models "your-model-id" --count 50000 --rotate-every 200 --output-dir ./output
 
-# Multiple models (rotates between them for variety)
-python generate.py generate --models "publisher/model-a" "publisher/model-b" "publisher/model-c" --count 50000 --rotate-every 150 --output-dir ./output
+# Multiple models — rotates between them for variety
+python generate.py generate --models "model-id-1" "model-id-2" "model-id-3" --count 50000 --rotate-every 150 --output-dir ./output
 ```
 
-Resume an interrupted run by running the exact same command — it picks up where it left off.
+Resume an interrupted run by running the exact same command — it counts what's already on disk and continues from there.
 
 ### 4. Check your progress
 
 ```bash
 python generate.py stats --output-dir ./output
-python generate.py stats --output-dir ./output --verbose   # per-category detail
+python generate.py stats --output-dir ./output --verbose    # per-category detail
 
-# Spot-check a random sample
+# Spot-check random samples
 python generate.py sample --output-dir ./output --n 3
 python generate.py sample --output-dir ./output --category rust_ownership --n 2
 ```
@@ -109,19 +120,19 @@ python generate.py sample --output-dir ./output --category rust_ownership --n 2
 ### 5. Scrape real Rust data
 
 ```bash
-# Top 500 crates by downloads
+# Top 500 crates by all-time downloads
 python scrape.py crates --top 500 --output-dir ./rust_data
 
-# rust-lang org + ecosystem repos (get a GitHub token first)
+# rust-lang org + ecosystem repos (GitHub token strongly recommended)
 python scrape.py github --token ghp_yourtoken --output-dir ./rust_data
 
-# Official docs (The Book, Reference, Nomicon, etc.)
+# Official docs: The Book, Reference, Nomicon, Async Book, Edition Guide
 python scrape.py docs --output-dir ./rust_data
 
 # users.rust-lang.org forum threads
 python scrape.py forum --pages 200 --output-dir ./rust_data
 
-# Or run everything in sequence
+# Run all four in sequence
 python scrape.py all --token ghp_yourtoken --output-dir ./rust_data
 
 # Check what you've collected
@@ -134,18 +145,18 @@ python scrape.py stats --output-dir ./rust_data
 
 ### Weighted Categories
 
-`categories.jsonl` contains 100 conversation categories, each with a `weight` field. Higher weight = more conversations generated from that category. The distribution is intentionally skewed:
+`categories.jsonl` contains 100 conversation categories, each with a `weight` field. Higher weight = more conversations generated from that category. The distribution is intentionally skewed toward Rust and programming:
 
-| Subcategory group | Categories | Approx. share |
+| Subcategory | Categories | Approx. weight share |
 |---|---|---|
-| Rust (all aspects) | 32 | ~47% |
-| Software Engineering | 12 | ~10% |
-| Systems Programming | 7 | ~7% |
-| Tooling & DevOps | 9 | ~7% |
-| General conversation | 30 | ~13% |
-| Other programming | 10 | ~16% |
+| Rust | 32 | 47% |
+| Software Engineering | 12 | 10% |
+| Systems Programming | 7 | 7% |
+| Tooling | 6 | 5% |
+| Computer Science | 4 | 4% |
+| Career / Educational / etc. | 39 | 27% |
 
-The general conversation categories (casual chat, explaining concepts, career discussions) exist to give the model broad language understanding — a model trained *only* on Rust code can generate Rust but can't hold a conversation about it.
+The general conversation categories (casual chat, explaining concepts, career discussions) give the model broad language understanding — a model trained *only* on Rust code can generate Rust but can't hold a conversation about it.
 
 ### Prompt Diversification
 
@@ -161,49 +172,51 @@ This creates tens of millions of unique prompt framings per category before any 
 
 ### Deduplication
 
-Every saved conversation is fingerprinted as the SHA-256 of its normalized first user turn. Fingerprints are persisted to `.hashes/{category}.txt`. On every generation:
+Every saved conversation is fingerprinted as the SHA-256 of its normalized first user turn. Fingerprints are persisted to `.hashes/{category}.txt` inside your output directory. On every generation:
 
-1. If the fingerprint already exists → discard and regenerate
+1. If the fingerprint already exists → discard silently and regenerate with a fresh prompt
 2. The dedup store is loaded at startup so resume runs inherit full history
 
 This ensures you never get the same conversation twice even across multiple sessions.
 
 ### Parse Repair
 
-Small models frequently return malformed JSON. Rather than discarding these, the parser runs a repair pipeline:
+Small models frequently return malformed JSON. Rather than discarding these, the parser runs a repair pipeline — in order, stopping at first success:
 
-1. Strip markdown fences and extract the JSON object
-2. Attempt straight parse
-3. Repair single quotes (Python dict style output)
-4. Repair truncated JSON (hit `max_tokens` mid-output) — tries 7 suffix closings
-5. Repair unescaped inner quotes in string values
-6. Normalize wrong role names (`Human`, `AI`, `Expert`, `Developer` → `user`/`assistant`)
-7. Merge consecutive same-role turns
-8. Drop trailing user turns (odd turn count)
-9. Drop leading assistant turns
-10. Unwrap nested structures (`{"conversation": {"turns": [...]}}`)
+1. Strip markdown fences and extract the JSON object (removes leading/trailing prose)
+2. Attempt straight `json.loads`
+3. Repair single quotes — some models output Python dict syntax instead of JSON
+4. Repair truncated output — hit `max_tokens` mid-stream; tries 7 different suffix closings
+5. Repair unescaped inner quotes inside string values
+6. Repair fused turns — some models pack two turns into one JSON object with duplicate `role`/`content` keys; uses `object_pairs_hook` to recover both turns before deduplication silently drops one
+7. Normalize wrong role names (`Human`, `AI`, `Expert`, `Developer` → `user`/`assistant`)
+8. Merge consecutive same-role turns
+9. Drop trailing user turns (odd turn count)
+10. Drop leading assistant turns
+11. Unwrap nested structures (`{"conversation": {"turns": [...]}}`)
 
-Only conversations that survive all repair attempts and still produce invalid JSON are discarded.
+Any parse that still fails after all repair attempts is logged in full to `parse_failures.log` in your output directory, so you can review the raw model output and add new repairs as needed.
 
 ### Model Rotation
 
 Pass multiple model IDs to `--models` and set `--rotate-every N`. The script will:
 
-1. Load the first model via the LM Studio API
-2. Generate N conversations
-3. Unload it, load the next model
-4. Repeat round-robin
+1. Unload any currently loaded models (clean slate)
+2. Load the first model via `POST /api/v1/models/load`
+3. Generate N conversations
+4. Unload it via `POST /api/v1/models/unload`, load the next
+5. Repeat round-robin
 
-This produces variety in tone, style, and occasional perspective differences — better training signal than a single model generating everything.
+This produces variety in tone, style, and phrasing — better training signal than a single model generating everything. It also means your laptop's RAM gets freed between models since only one is in memory at a time.
 
 ### Thinking Model Support
 
-Qwen3, DeepSeek-R1, and other thinking models are fully supported. The script handles both:
+Qwen3, DeepSeek-R1, and other reasoning models are fully supported. The script handles both output patterns:
 
-- `delta.reasoning_content` — LM Studio's explicit reasoning field
-- `<think>...</think>` tags in content — including tags that span multiple streaming chunks
+- `delta.reasoning_content` — LM Studio's dedicated reasoning field
+- `<think>...</think>` tags in `delta.content` — including tags that span multiple streaming chunks
 
-Thinking tokens are shown live in the terminal but **stripped from saved training data** — your JSONL files will never contain `<think>` artifacts.
+Thinking tokens are shown live in the terminal (overwriting a single line so they don't flood the screen) but **stripped from saved training data** — your JSONL files will never contain `<think>` artifacts.
 
 ---
 
@@ -255,7 +268,7 @@ This is standard chat format — compatible with most training frameworks (trl, 
 **To bias toward a different domain** (medical, legal, finance, game dev, etc.):
 1. Add your domain's categories with high weights
 2. Lower the weights on categories you care less about
-3. Add domain-specific angles to `_CATEGORY_ANGLES` in `generate.py`
+3. Add domain-specific angle lists to `_CATEGORY_ANGLES` in `generate.py` for even more variety within your categories
 
 ---
 
@@ -263,46 +276,46 @@ This is standard chat format — compatible with most training frameworks (trl, 
 
 ### crates.io
 
-Downloads tarballs directly from `static.crates.io` (no rate limit) after fetching the top-N list from the API (1 req/sec limit respected). Extracts all `.rs` files, filters out:
-- Generated code (`bindings.rs`, `.pb.rs`, vendor directories)
+Fetches the top-N crate list from `crates.io/api/v1/crates` (rate limited to 1 request/sec per the crawlers policy), then downloads tarballs directly from `static.crates.io` (CDN, no rate limit). Extracts all `.rs` files and filters out:
+- Generated code (`bindings.rs`, `.pb.rs`, vendor directories, `target/`)
 - Files under 100 bytes or over 500KB
-- Files without real Rust code (re-export-only, empty modules)
+- Files with no real Rust constructs (`fn`, `impl`, `struct`, etc.)
 
 ### GitHub
 
 Downloads full repo archives for:
-- All `rust-lang` org repos (compiler, stdlib, Cargo, Clippy, rust-analyzer, The Book, Reference, Nomicon, RFCs, etc.)
-- ~40 ecosystem crates (tokio, serde, axum, rayon, clap, ripgrep, etc.)
+- 12 `rust-lang` org repos: the compiler, Cargo, Clippy, rust-analyzer, The Book, Reference, Nomicon, RFCs, and more
+- ~40 curated ecosystem crates: tokio, serde, axum, rayon, clap, ripgrep, sqlx, and others
 
-Get a free GitHub token at [github.com/settings/tokens](https://github.com/settings/tokens) — no scopes needed. Without it you're rate-limited to 60 req/hr which is very slow for 50+ repos.
+Get a free GitHub personal access token at [github.com/settings/tokens](https://github.com/settings/tokens) — no scopes needed, public repo access only. Without a token you're rate-limited to 60 requests/hour, which is very slow across 50+ repos. With a token it's 5,000/hour.
 
 ### Docs
 
-Scrapes chapter-by-chapter from:
-- The Rust Book (all 20 chapters + appendices)
+Scrapes chapter-by-chapter from the official Rust documentation sites:
+- The Rust Book (all chapters and appendices)
 - The Rust Reference
-- The Rustonomicon
+- The Rustonomicon (unsafe book)
 - The Async Book
 - The Edition Guide
 
 ### URLO Forum
 
-Fetches threads from `users.rust-lang.org` via the Discourse JSON API. Threads are filtered to only keep ones that actually discuss Rust (by keyword matching). Already in conversation format — high-quality real debugging and learning discussions.
+Fetches threads from `users.rust-lang.org` via the Discourse JSON API. Threads are filtered to keep only those that actually discuss Rust topics (by keyword matching). Already in conversation format — high-quality real debugging and learning exchanges.
 
-All four scrapers support **resume** via a `.manifest_{source}.txt` file. Kill at any time and restart — already-completed items are skipped instantly.
+All four scrapers support **resume** via a `.manifest_{source}.txt` file in your output directory. Kill at any time, restart with the same command — already-completed items are skipped instantly.
 
 ---
 
 ## Hardware Reality Check
 
-This was built to run on modest hardware. Tested on a Ryzen 7 laptop with integrated Radeon graphics and 16GB unified RAM.
+Built and tested on a Ryzen 7 laptop with integrated Radeon graphics and 16GB unified RAM.
 
 **Generation speed** depends entirely on your model and hardware:
 - 4B model on integrated graphics: ~5–15 tok/s → ~2–4 minutes per conversation
-- 7B model on a mid-range GPU: ~20–40 tok/s → ~30–60 seconds per conversation
+- 7B model on a mid-range dedicated GPU: ~20–40 tok/s → ~30–60 seconds per conversation
 - 13B model on a high-end GPU: ~15–25 tok/s → ~45–90 seconds per conversation
 
-**Target dataset size:** For a 500M parameter model, aim for ~300K–500K conversations for Phase 1. That's a meaningful chunk of data without being so large that the synthetic quality ceiling becomes a bottleneck.
+**Target dataset size:** For a 500M parameter model, aim for ~300K–500K synthetic conversations for Phase 1. That's a meaningful base without hitting the quality ceiling of small generator models.
 
 At 3 minutes per conversation on slow hardware: 300K conversations ≈ ~600 hours of compute. Run it in the background over several weeks.
 
@@ -313,8 +326,9 @@ At 3 minutes per conversation on slow hardware: 300K conversations ≈ ~600 hour
 ## Roadmap
 
 - [x] Synthetic conversation generator with model rotation
-- [x] Prompt diversification and dedup
+- [x] Prompt diversification and deduplication
 - [x] JSON repair pipeline for small model output
+- [x] Parse failure logging for iterative repair improvements
 - [x] Real Rust data scraper (crates.io, GitHub, docs, forum)
 - [ ] Tokenizer training (BPE, ~32K vocab, trained on the full dataset)
 - [ ] Model architecture (decoder-only transformer, ~500M params)
@@ -337,8 +351,8 @@ This project has a different goal: understanding the full stack from raw text to
 
 PRs welcome, especially:
 - New categories in `categories.jsonl`
-- Additional angle lists in `_CATEGORY_ANGLES`
-- More repair strategies in the parse pipeline
+- Additional angle lists in `_CATEGORY_ANGLES` in `generate.py`
+- More repair strategies in the parse pipeline (check `parse_failures.log` for patterns)
 - Phase 2 implementation (tokenizer, architecture, training)
 
 ---
