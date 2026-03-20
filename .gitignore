@@ -1,5 +1,4 @@
 # Generated data — can be gigabytes, never commit
-rust_data/
 rust_forge/
 
 # Dedup fingerprint cache
