@@ -1,4 +1,4 @@
-# RustMind Dataset Schema — v1.0
+# ClippysRevenge Dataset Schema — v1.0
 
 A standardized record format for Rust AI training data.  Every record in
 the dataset — regardless of source, contributor, or generation method —
