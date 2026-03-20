@@ -1,4 +1,4 @@
-# ClippysRevenge — Hobbyist LLM Training Pipeline
+# RustMind — Hobbyist LLM Training Pipeline
 
 A complete, from-scratch pipeline for training a small language model on conversational English, biased toward programming and Rust development. Built to run on consumer hardware — no cloud GPUs required.
 
@@ -24,7 +24,7 @@ Data sources:
 
 ### Phase 2 — Rust Specialization *(planned)*
 
-Fine-tune the Phase 1 model on curated, validated Rust examples: compiler-verified code, real crate implementations, code review pairs, and senior-dev-level explanations. This is where the model learns to *write* Rust, not just talk about it.
+Fine-tune the Phase 1 model on curated, validated Rust examples. The foundation is `rust_categories.jsonl` — 1,000 granular categories covering every major Rust pattern, concept, and ecosystem crate. Frontier models (Claude, GPT-4o) generate examples against these categories, every one of which is then run through a validation pipeline to ensure it compiles clean. This is where the model learns to *write* Rust, not just talk about it.
 
 ---
 
@@ -35,6 +35,7 @@ rustmind/
 ├── generate.py          # Synthetic conversation generator
 ├── scrape.py            # Real Rust data scraper
 ├── categories.jsonl     # 100 weighted conversation categories
+├── rust_categories.jsonl  # 1,000 granular Rust code example categories
 ├── requirements.txt
 ├── README.md
 ├── .gitignore
@@ -272,7 +273,76 @@ This is standard chat format — compatible with most training frameworks (trl, 
 
 ---
 
-## Scraper Details
+## Rust Code Examples Dataset (`rust_categories.jsonl`)
+
+`rust_categories.jsonl` is the backbone of Phase 2 — 1,000 granular Rust categories used to generate verified, compilable code examples via frontier models (Claude, GPT-4o). Every example generated from this list is intended to pass a full validation pipeline: `cargo fmt`, `cargo clippy -D warnings`, `cargo build` against MSRV, and `cargo test` where tests are present. The goal is a dataset where **100% of the code compiles clean** — no exceptions.
+
+### Coverage
+
+The 1,000 categories span the full breadth of serious Rust development, organized into 50+ topic groups:
+
+| Group | Categories | Focus |
+|---|---|---|
+| Crate | 112 | Ecosystem crates: tokio, serde, axum, sqlx, clap, diesel, and ~100 more |
+| Advanced | 99 | Executors, lock-free algorithms, formal verification, kernel modules |
+| Core | 52 | Ownership, borrowing, lifetimes, Pin, Drop, interior mutability |
+| Async | 45 | Tokio, async patterns, futures, Waker, cancellation |
+| Patterns | 42 | Typestate, builder, RAII, newtype, state machines |
+| Traits | 37 | Generics, HRTBs, trait objects, associated types, blanket impls |
+| Iterators | 34 | Custom iterators, adapters, lazy evaluation, collect |
+| Axum | 34 | Web handlers, extractors, middleware, state, error handling |
+| Testing | 31 | Unit, integration, property-based, mocking, async tests |
+| Macros | 28 | Declarative, procedural, derive, attribute macros |
+| Lifetimes | 24 | Elision, variance, subtyping, HRTBs, struct references |
+| Type System | 20 | Phantom types, const generics, GATs, type-level programming |
+| + 38 more | ~362 | Error handling, collections, FFI, WASM, no_std, Bevy, Tonic, and more |
+
+### Schema
+
+Each entry contains everything needed to drive a code generation prompt:
+
+```json
+{
+  "id": 5,
+  "category": "Core - NLL (Non-Lexical Lifetimes)",
+  "prompt_focus": "Writing code that relies on NLL to release borrows before end of scope; patterns that didn't compile in pre-NLL Rust.",
+  "difficulty": "intermediate",
+  "tags": ["lifetimes", "NLL", "borrow-checker"],
+  "target_entries": 5,
+  "example_type": "idiomatic",
+  "weight": 15,
+  "turns_min": 8,
+  "turns_max": 16
+}
+```
+
+| Field | Description |
+|---|---|
+| `prompt_focus` | Specific aspects and patterns to cover — the direct input to the generation prompt |
+| `difficulty` | `beginner` / `intermediate` / `advanced` — 18% / 45% / 38% distribution |
+| `target_entries` | Minimum examples per category (5 baseline; scale up for high-weight categories) |
+| `example_type` | `idiomatic` — all examples target idiomatic, production-quality Rust |
+| `weight` | 1–15 priority score; 27% of categories are weight ≥10 (complex, high training value) |
+| `turns_min/max` | Conversation turn count range for dialogue-format examples |
+
+### Scale
+
+At 100 examples per category: **100,000 total examples** — roughly 30–50M tokens of verified Rust code. Combined with the conversational data from `generate.py` and the documentation scraped by `scrape.py`, this forms the core of a training set where the model sees real, validated Rust across every major pattern and crate in the ecosystem.
+
+### Validation Pipeline
+
+All examples generated from this category list are run through an external validation app (separate repo) before being added to the training set:
+
+```
+cargo fmt --check
+cargo clippy -- -D warnings
+cargo build  (MSRV)
+cargo test   (if tests present)
+```
+
+Only examples that pass all checks are included. Unsafe code is flagged separately and verified to include safety documentation. This is the property that makes this dataset different from scraping GitHub — every line of code the model trains on has been compiler-verified.
+
+---
 
 ### crates.io
 
@@ -330,6 +400,9 @@ At 3 minutes per conversation on slow hardware: 300K conversations ≈ ~600 hour
 - [x] JSON repair pipeline for small model output
 - [x] Parse failure logging for iterative repair improvements
 - [x] Real Rust data scraper (crates.io, GitHub, docs, forum)
+- [x] 1,000-category Rust code example taxonomy (`rust_categories.jsonl`)
+- [ ] Frontier model generation pipeline (100K verified Rust examples)
+- [ ] Validation pipeline integration (Clippy + fmt + MSRV + test)
 - [ ] Tokenizer training (BPE, ~32K vocab, trained on the full dataset)
 - [ ] Model architecture (decoder-only transformer, ~500M params)
 - [ ] Training loop (PyTorch + mixed precision)
