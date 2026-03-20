@@ -345,5 +345,4 @@ PRs welcome, especially:
 
 ## License
 
-MIT#   C l i p p y s R e v e n g e  
- 
+MIT
