@@ -1,4 +1,4 @@
-# RustMind — Hobbyist LLM Training Pipeline
+# ClippysRevenge — Hobbyist LLM Training Pipeline
 
 A complete, from-scratch pipeline for training a small language model on conversational English, biased toward programming and Rust development. Built to run on consumer hardware — no cloud GPUs required.
 
