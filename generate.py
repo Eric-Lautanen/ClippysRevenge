@@ -472,66 +472,100 @@ def append_conversation(output_dir: str, cat_id: str, conv: dict) -> None:
         f.write(json.dumps(conv, ensure_ascii=False) + "\n")
 
 # ─────────────────────────────────────────────────────────
-#  LM STUDIO API
+#  LLAMA.CPP ROUTER API
+#
+#  llama-server in router mode (started without -m) exposes:
+#    GET  /v1/models              list all discovered models + status
+#    POST /models/load            load a model by filename
+#    POST /models/unload          unload a model by id
+#    POST /v1/chat/completions    generate (model field routes the request)
+#
+#  Key differences from LM Studio:
+#  - No /api/v1/ prefix on load/unload — it's just /models/load
+#  - Model IDs are the GGUF filename (or path relative to --models-dir)
+#  - The "model" field in chat completions IS the routing key — llama.cpp
+#    auto-loads the model on first request if --no-models-autoload is not set
+#  - No instance_id concept — the model filename is the stable identifier
+#  - Load payload is just {"model": "filename.gguf"} — context/ngl etc.
+#    are inherited from the server's startup flags (--models-dir -ngl -c)
 # ─────────────────────────────────────────────────────────
 
 def list_loaded_models() -> list:
+    """Return models currently loaded (status == 'loaded')."""
     try:
-        r = requests.get(f"{LM_BASE}/api/v0/models", timeout=10)
+        r = requests.get(f"{LM_BASE}/v1/models", timeout=10)
         r.raise_for_status()
-        return [m for m in r.json().get("data", []) if m.get("state") == "loaded"]
+        data = r.json().get("data", [])
+        # llama.cpp returns all discovered models; filter to loaded ones
+        # The status field may be 'loaded', 'loading', or 'unloaded'
+        return [m for m in data
+                if m.get("status") in ("loaded", None)
+                or m.get("state") == "loaded"]
     except requests.exceptions.ConnectionError:
-        console.print("[error]Cannot connect to LM Studio on port 1234.[/error]")
+        console.print("[error]Cannot connect to llama-server on port 1234.[/error]")
+        console.print("[dim]Start it with:  llama-server --models-dir <path> -ngl 99 -c 4096 --flash-attn on --port 1234[/dim]")
         sys.exit(1)
     except Exception as e:
         log.warning(f"list_models: {e}")
         return []
 
-def unload_model(instance_id: str) -> bool:
+def unload_model(model_id: str) -> bool:
+    """Unload a model by its id (filename)."""
     try:
-        r = requests.post(f"{API_V1}/models/unload",
-                          json={"instance_id": instance_id}, timeout=30)
+        r = requests.post(
+            f"{LM_BASE}/models/unload",
+            json={"model": model_id},
+            timeout=30,
+        )
         r.raise_for_status()
         return True
     except Exception as e:
-        log.warning(f"unload {instance_id}: {e}")
+        log.warning(f"unload {model_id}: {e}")
         return False
 
 def unload_all() -> None:
     for m in list_loaded_models():
-        mid = m.get("id") or m.get("instance_id", "")
+        mid = m.get("id", "")
         if mid:
             unload_model(mid)
 
 def load_model(model_id: str) -> Optional[str]:
+    """
+    Load a model via POST /models/load.
+    Context length, ngl, and flash-attn are inherited from the server's
+    startup flags — no need to pass them here.
+    Returns the model_id to use for routing, or None on failure.
+    """
     console.print(f"[model]Loading: {model_id}[/model]")
     try:
         r = requests.post(
-            f"{API_V1}/models/load",
-            json={"model": model_id, "context_length": CTX_LENGTH,
-                  "flash_attention": True, "echo_load_config": True},
+            f"{LM_BASE}/models/load",
+            json={"model": model_id},
             timeout=LOAD_TIMEOUT,
         )
         r.raise_for_status()
-        data = r.json()
-        iid  = data.get("instance_id", model_id)
-        secs = data.get("load_time_seconds")
-        t    = f" ({secs:.1f}s)" if secs else ""
-        console.print(f"[success]  Loaded{t} → {iid}[/success]")
-        return iid
+        console.print(f"[success]  Loaded → {model_id}[/success]")
+        return model_id
+
     except requests.exceptions.HTTPError as e:
         code = e.response.status_code if e.response is not None else 0
         if code == 409:
-            console.print(f"[warn]  Already loaded — reusing[/warn]")
-            for m in list_loaded_models():
-                if model_id in (m.get("id", ""), m.get("instance_id", "")):
-                    return m.get("instance_id") or m.get("id", model_id)
+            # Already loaded — that's fine, just use it
+            console.print(f"[warn]  Already loaded — reusing {model_id}[/warn]")
             return model_id
-        log.warning(f"HTTP {code} loading {model_id}")
-        return None
+        # llama.cpp auto-loads on first inference request anyway,
+        # so a load failure here isn't necessarily fatal
+        log.warning(f"HTTP {code} on /models/load for {model_id} — will try anyway")
+        return model_id
+
+    except requests.exceptions.Timeout:
+        log.warning(f"Timeout loading {model_id} — will attempt inference anyway")
+        return model_id
+
     except Exception as e:
-        log.warning(f"load_model: {e}")
-        return None
+        log.warning(f"load_model {model_id}: {e}")
+        return model_id   # llama.cpp auto-loads on inference, so keep going
+
 
 # ─────────────────────────────────────────────────────────
 #  SYSTEM PROMPT
