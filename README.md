@@ -21,6 +21,7 @@ Data sources:
 - **Real Rust source code** scraped from crates.io and GitHub (this repo)
 - **Official documentation** — The Rust Book, Reference, Nomicon, RFCs
 - **Forum threads** — users.rust-lang.org (real people debugging real Rust)
+- **External datasets** — curated third-party Rust datasets (see [External Datasets](#external-datasets))
 
 ### Phase 2 — Rust Specialization *(planned)*
 
@@ -34,6 +35,8 @@ Fine-tune the Phase 1 model on curated, validated Rust examples. The foundation 
 rustmind/
 ├── generate.py          # Synthetic conversation generator
 ├── scrape.py            # Real Rust data scraper
+├── download_datasets.py # External dataset downloader
+├── schema_profiler.py   # JSONL schema discovery tool
 ├── categories.jsonl     # 100 weighted conversation categories
 ├── rust_categories.jsonl  # 1,000 granular Rust code example categories
 ├── requirements.txt
@@ -47,6 +50,8 @@ rustmind/
 │   ├── parse_failures.log   # Full raw output of any failed parses
 │   └── ...              # one .jsonl file per category
 │
+├── datasets/            # Downloaded external datasets (gitignored)
+│
 └── rust_data/           # Scraped Rust data (gitignored)
     ├── crates/
     ├── github/
@@ -59,12 +64,12 @@ rustmind/
 ## Requirements
 
 ```bash
-pip install requests rich
+pip install requests rich huggingface_hub pyarrow
 ```
 
 Python 3.10+ required. No GPU needed for data generation — the script calls LM Studio's HTTP API, so all inference runs inside LM Studio.
 
-You also need **LM Studio** with the local server running. Any instruction-tuned model works. Uncensored models tend to produce more varied training conversations. The script has been tested with Qwen3, Nemotron, and Dolphin variants.
+You also need **LM Studio** with the local server running. Any instruction-tuned model works. The script has been tested with Tesslate Tessa-Rust-T1 7B, Qwen3, Nemotron, and Dolphin variants. Non-thinking models are strongly recommended for bulk generation — thinking models burn tokens on chain-of-thought that gets stripped from the output and never makes it into training data.
 
 > **Note:** You do not need to pre-load a model before running the script. The generator manages loading and unloading models itself via the LM Studio API. You only need the LM Studio server process running.
 
@@ -118,7 +123,20 @@ python generate.py sample --output-dir ./output --n 3
 python generate.py sample --output-dir ./output --category rust_ownership --n 2
 ```
 
-### 5. Scrape real Rust data
+### 5. Download external datasets
+
+```bash
+# Download all external Rust datasets
+python download_datasets.py --output-dir ./datasets
+
+# Download a specific dataset
+python download_datasets.py --output-dir ./datasets --dataset tesslate_rust_dataset
+
+# Profile schemas across all downloaded files
+python schema_profiler.py --input-dir ./datasets --compare
+```
+
+### 6. Scrape real Rust data
 
 ```bash
 # Top 500 crates by all-time downloads
@@ -139,6 +157,41 @@ python scrape.py all --token ghp_yourtoken --output-dir ./rust_data
 # Check what you've collected
 python scrape.py stats --output-dir ./rust_data
 ```
+
+---
+
+## External Datasets
+
+This project incorporates and builds upon several third-party Rust datasets. All are used in accordance with their respective licenses. Credit and thanks to the teams who built and released these publicly.
+
+### Tesslate / Rust_Dataset
+**Source:** [https://huggingface.co/datasets/Tesslate/Rust_Dataset](https://huggingface.co/datasets/Tesslate/Rust_Dataset)
+**Size:** ~46,600 records (~540MB)
+**Description:** Large conversational Rust dataset produced by the Tesslate team, used to train the Tessa-Rust-T1 model family. Primarily multi-turn dialogue format covering Rust concepts, debugging, and idiomatic usage.
+**License:** See dataset page
+
+### Tesslate / Rust_sharegpt
+**Source:** [https://huggingface.co/datasets/Tesslate/Rust_sharegpt](https://huggingface.co/datasets/Tesslate/Rust_sharegpt)
+**Description:** Tesslate's Rust dataset in ShareGPT conversational format — directly compatible with most training frameworks without preprocessing.
+**License:** See dataset page
+
+### Fortytwo-Network / Strandset-Rust-v1
+**Source:** [https://huggingface.co/datasets/Fortytwo-Network/Strandset-Rust-v1](https://huggingface.co/datasets/Fortytwo-Network/Strandset-Rust-v1)
+**Size:** 191,008 verified examples across 15 task categories
+**Description:** A large-scale synthetic Rust dataset built by Fortytwo Network using their Swarm Inference pipeline, where multiple SLMs collaboratively generate, critique, and rank examples. Covers code generation, bug detection, refactoring, optimization, documentation, testing, and more. Dataset construction involved 2,383 crates from crates.io with automatic compilation tests and semantic validation of ownership and lifetime correctness. Non-code tasks were validated using Claude Sonnet and GPT-4o as reference evaluators.
+**License:** Apache 2.0
+
+```
+@misc{Strandset-Rust-v1,
+  title   = {Strand-Rust-Coder-v1: Rust Coding Model Fine-Tuned on Peer-Ranked Synthetic Data},
+  author  = {Ivashov, Aleksei and Larin, Vladyslav and Tripathi, Vishesh and Nikitin, Ivan},
+  year    = {2025},
+  publisher = {Hugging Face},
+  url     = {https://huggingface.co/datasets/Fortytwo-Network/Strandset-Rust-v1}
+}
+```
+
+> **Note on schema standardization:** These datasets use different schemas from each other and from this project's native format. A schema normalization pipeline is planned that will convert all external datasets to a unified format with consistent fields (`broken_code`, `error_message`, `fixed_code`, `explanation`, `validation`, etc.). Fields not present in the source data will be left blank for future enrichment. See `schema_profiler.py` for tooling to audit schemas before conversion.
 
 ---
 
@@ -218,6 +271,8 @@ Qwen3, DeepSeek-R1, and other reasoning models are fully supported. The script h
 - `<think>...</think>` tags in `delta.content` — including tags that span multiple streaming chunks
 
 Thinking tokens are shown live in the terminal (overwriting a single line so they don't flood the screen) but **stripped from saved training data** — your JSONL files will never contain `<think>` artifacts.
+
+> **Recommendation:** Use non-thinking models for bulk generation. Thinking tokens cost generation time and are always stripped — they produce zero training signal. A 7B non-thinking model will generate more usable conversations per hour than a 4B thinking model despite lower tok/s, because every token it generates becomes training data.
 
 ---
 
@@ -401,6 +456,9 @@ At 3 minutes per conversation on slow hardware: 300K conversations ≈ ~600 hour
 - [x] Parse failure logging for iterative repair improvements
 - [x] Real Rust data scraper (crates.io, GitHub, docs, forum)
 - [x] 1,000-category Rust code example taxonomy (`rust_categories.jsonl`)
+- [x] External dataset downloader (`download_datasets.py`)
+- [x] Schema profiler for dataset auditing (`schema_profiler.py`)
+- [ ] Schema normalization pipeline (convert external datasets to unified format)
 - [ ] Frontier model generation pipeline (100K verified Rust examples)
 - [ ] Validation pipeline integration (Clippy + fmt + MSRV + test)
 - [ ] Tokenizer training (BPE, ~32K vocab, trained on the full dataset)
@@ -426,6 +484,7 @@ PRs welcome, especially:
 - New categories in `categories.jsonl`
 - Additional angle lists in `_CATEGORY_ANGLES` in `generate.py`
 - More repair strategies in the parse pipeline (check `parse_failures.log` for patterns)
+- Schema normalization mappings for external datasets
 - Phase 2 implementation (tokenizer, architecture, training)
 
 ---
