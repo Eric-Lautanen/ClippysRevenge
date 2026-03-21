@@ -1,6 +1,5 @@
 # Generated data — can be gigabytes, never commit
 rust_forge/
-strandset-rust/
 
 # Dedup fingerprint cache
 .hashes/
