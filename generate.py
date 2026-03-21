@@ -426,6 +426,7 @@ class PromptVariator:
             f"Topic: {cat['topic']}\n"
             f"Description: {cat['description']}\n"
             f"Category guidance: {cat['system_hint']}\n\n"
+            f"IMPORTANT: Any and all code examples in this conversation must be written in Rust only.\n\n"  # ← ADD THIS
             f"Output raw JSON only:\n"
             f'{{"category":"{cat["subcategory"]}","topic":"{cat["topic"]}","turns":[...]}}'
         )
@@ -546,6 +547,7 @@ SYS_PROMPT = (
     '{"role":"user","content":"..."},{"role":"assistant","content":"..."}]}\n'
     "- Turns strictly alternate user/assistant, starting with user.\n"
     "- For technical topics: use real code and realistic error messages.\n"
+    "- ALL code examples MUST be written in Rust only. Never use any other language.\n"  # ← ADD THIS
     "- For casual topics: use natural informal language.\n"
     "- Every conversation must feel genuinely unique.\n"
     "- Raw JSON ONLY. No ```json``` wrappers ever."
