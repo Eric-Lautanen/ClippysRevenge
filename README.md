@@ -35,8 +35,6 @@ Fine-tune the Phase 1 model on curated, validated Rust examples. The foundation 
 rustmind/
 ├── generate.py          # Synthetic conversation generator
 ├── scrape.py            # Real Rust data scraper
-├── download_datasets.py # External dataset downloader
-├── schema_profiler.py   # JSONL schema discovery tool
 ├── categories.jsonl     # 100 weighted conversation categories
 ├── rust_categories.jsonl  # 1,000 granular Rust code example categories
 ├── requirements.txt
@@ -123,20 +121,7 @@ python generate.py sample --output-dir ./output --n 3
 python generate.py sample --output-dir ./output --category rust_ownership --n 2
 ```
 
-### 5. Download external datasets
-
-```bash
-# Download all external Rust datasets
-python download_datasets.py --output-dir ./datasets
-
-# Download a specific dataset
-python download_datasets.py --output-dir ./datasets --dataset tesslate_rust_dataset
-
-# Profile schemas across all downloaded files
-python schema_profiler.py --input-dir ./datasets --compare
-```
-
-### 6. Scrape real Rust data
+### 5. Scrape real Rust data
 
 ```bash
 # Top 500 crates by all-time downloads
@@ -191,8 +176,7 @@ This project incorporates and builds upon several third-party Rust datasets. All
 }
 ```
 
-> **Note on schema standardization:** These datasets use different schemas from each other and from this project's native format. A schema normalization pipeline is planned that will convert all external datasets to a unified format with consistent fields (`broken_code`, `error_message`, `fixed_code`, `explanation`, `validation`, etc.). Fields not present in the source data will be left blank for future enrichment. See `schema_profiler.py` for tooling to audit schemas before conversion.
-
+> **Note on schema standardization:** These datasets use different schemas from each other and from this project's native format. A schema normalization pipeline is planned that will convert all external datasets to a unified format with consistent fields (`broken_code`, `error_message`, `fixed_code`, `explanation`, `validation`, etc.). Fields not present in the source data will be left blank for future enrichment.
 ---
 
 ## How the Generator Works
