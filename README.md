@@ -456,8 +456,6 @@ At 3 minutes per conversation on slow hardware: 300K conversations ≈ ~600 hour
 - [x] Parse failure logging for iterative repair improvements
 - [x] Real Rust data scraper (crates.io, GitHub, docs, forum)
 - [x] 1,000-category Rust code example taxonomy (`rust_categories.jsonl`)
-- [x] External dataset downloader (`download_datasets.py`)
-- [x] Schema profiler for dataset auditing (`schema_profiler.py`)
 - [ ] Schema normalization pipeline (convert external datasets to unified format)
 - [ ] Frontier model generation pipeline (100K verified Rust examples)
 - [ ] Validation pipeline integration (Clippy + fmt + MSRV + test)
