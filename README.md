@@ -37,7 +37,6 @@ rustmind/
 ├── scrape.py            # Real Rust data scraper
 ├── categories.jsonl     # 100 weighted conversation categories
 ├── rust_categories.jsonl  # 1,000 granular Rust code example categories
-├── requirements.txt
 ├── README.md
 ├── .gitignore
 │
@@ -60,10 +59,6 @@ rustmind/
 ---
 
 ## Requirements
-
-```bash
-pip install requests rich huggingface_hub pyarrow
-```
 
 Python 3.10+ required. No GPU needed for data generation — the script calls LM Studio's HTTP API, so all inference runs inside LM Studio.
 
