@@ -547,7 +547,8 @@ SYS_PROMPT = (
     '{"role":"user","content":"..."},{"role":"assistant","content":"..."}]}\n'
     "- Turns strictly alternate user/assistant, starting with user.\n"
     "- For technical topics: use real code and realistic error messages.\n"
-    "- ALL code examples MUST be written in Rust only. Never use any other language.\n"  # ← ADD THIS
+    "- ALL code examples MUST be written in Rust only. Never use any other language.\n"
+    "- ANY MENTION OF CODE SNIPPETS MUST BE FOLLOWED BY CODE SNIPPETS!\n"
     "- For casual topics: use natural informal language.\n"
     "- Every conversation must feel genuinely unique.\n"
     "- Raw JSON ONLY. No ```json``` wrappers ever."
