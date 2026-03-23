@@ -1295,6 +1295,139 @@ def _repair_outer_wrapper(text: str) -> Optional[dict]:
     return None
 
 
+def _close_json(text: str) -> str:
+    """
+    Compute the minimal closing suffix needed to make an incomplete JSON
+    document syntactically complete.
+
+    Scans the text character-by-character while tracking string boundaries
+    (so braces/brackets inside strings are ignored) and maintains a stack of
+    open containers.  Returns the exact sequence of closing characters needed.
+
+    Examples:
+      '{"a": [1, 2'          → ']}'
+      '"content": "hello'    → '"}'   (also closes the open string)
+      deeply truncated JSON  → '"}]}]}]}'
+    """
+    stack: list = []
+    in_str = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if in_str:
+            if ch == "\\":
+                i += 2
+                continue
+            elif ch == '"':
+                in_str = False
+        else:
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                stack.append("}")
+            elif ch == "}":
+                if stack and stack[-1] == "}":
+                    stack.pop()
+            elif ch == "[":
+                stack.append("]")
+            elif ch == "]":
+                if stack and stack[-1] == "]":
+                    stack.pop()
+        i += 1
+    close = '"' if in_str else ""
+    for ch in reversed(stack):
+        close += ch
+    return close
+
+
+def _repair_nested_turns(text: str) -> Optional[dict]:
+    """
+    Fix two related structural issues that appear together:
+
+    1. Duplicate 'content' keys — model emits:
+         {"role": "X", "content": "real text", "content": "", "topic": null, "turns": [...]}
+       json.loads keeps only the LAST value (""), discarding the real content.
+       A custom hook is used to keep the FIRST non-empty content instead.
+
+    2. Embedded 'turns' sub-arrays — the model restarts the conversation
+       tree inside a turn object.  This function recursively collects all
+       role/content pairs in document order and deduplicates them.
+    """
+    def _first_content_hook(pairs: list) -> dict:
+        d: dict = {}
+        for k, v in pairs:
+            if k == "content":
+                # Keep first non-empty content value
+                if k not in d or (not str(d[k]).strip() and str(v).strip()):
+                    d[k] = v
+            elif k not in d:
+                d[k] = v
+        return d
+
+    try:
+        root = json.loads(text, object_pairs_hook=_first_content_hook)
+    except json.JSONDecodeError:
+        return None
+
+    top_turns = root.get("turns", [])
+    if not isinstance(top_turns, list):
+        return None
+
+    # Only engage if at least one turn has a nested 'turns' key
+    if not any(isinstance(t, dict) and "turns" in t for t in top_turns):
+        return None
+
+    def _collect(obj: dict) -> list:
+        """Collect turns from obj and any nested turns arrays, in document order."""
+        result = []
+        role    = obj.get("role", "")
+        content = obj.get("content", "")
+        if role in ("user", "assistant") and isinstance(content, str) and len(content.strip()) >= 4:
+            result.append({"role": role, "content": content.strip()})
+        nested = obj.get("turns")
+        if isinstance(nested, list):
+            for item in nested:
+                if isinstance(item, dict):
+                    result.extend(_collect(item))
+        return result
+
+    raw_turns: list = []
+    for t in top_turns:
+        if isinstance(t, dict):
+            raw_turns.extend(_collect(t))
+
+    if len(raw_turns) < 2:
+        return None
+
+    # Deduplicate: skip turns whose (role, first-80-chars) was already seen
+    seen: set = set()
+    deduped: list = []
+    for t in raw_turns:
+        key = (t["role"], t["content"][:80])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(t)
+
+    if len(deduped) < 2:
+        return None
+
+    result = {k: v for k, v in root.items() if k != "turns"}
+    result["turns"] = deduped
+    return result
+
+
+def _repair_truncated_nested(text: str) -> Optional[dict]:
+    """
+    Handles JSON that is both truncated AND has the nested-turns / duplicate-
+    content-key pattern.  Uses _close_json to compute the exact closing suffix
+    for any nesting depth, then delegates to _repair_nested_turns.
+    """
+    suffix = _close_json(text)
+    if not suffix:
+        return None
+    return _repair_nested_turns(text + suffix)
+
+
 def repair_and_parse(raw: str) -> Optional[dict]:
     """
     Full repair pipeline. Returns a dict with a valid "turns" list or None.
@@ -1310,10 +1443,12 @@ def repair_and_parse(raw: str) -> Optional[dict]:
       7.  Closing fence escaped quote  (```\\" → ```")
       8.  Invalid escape sequences     (\\ before non-special chars)
       9.  Truncation repair            (hit max_tokens mid-output)
+      9b. Truncation + nested turns    (truncated AND duplicate-content-key/embedded-turns)
       10. Missing turn-close brace     (with or without preceding comma)
-      11. Unescaped inner quotes       (content contains raw ")
-      12. Stray sentence punctuation   (. ! ? > after string close)
-      12b.Multi-pass combined fixes    (trailing comma + stray punct + fence quote + invalid esc)
+      11. Nested turns / dup keys      (embedded turns sub-arrays, first non-empty content)
+      12. Unescaped inner quotes       (content contains raw ")
+      13. Stray sentence punctuation   (. ! ? > after string close)
+      13b.Multi-pass combined fixes    (trailing comma + stray punct + fence quote + invalid esc)
       13. Embedded JSON in content     (unescaped {} inside strings)
       14. Outer wrapper                ({ {"turns":[...]} })
       Post-parse:
@@ -1366,12 +1501,20 @@ def repair_and_parse(raw: str) -> Optional[dict]:
         if data: log.debug("repair: truncated JSON")
 
     if data is None:
+        data = _repair_truncated_nested(text)
+        if data: log.debug("repair: truncated JSON with nested turns")
+
+    if data is None:
         data = _repair_missing_turn_close(text)
         if data: log.debug("repair: missing turn close brace")
 
     if data is None:
         data = _repair_unescaped_inner_quotes(text)
         if data: log.debug("repair: unescaped inner quotes")
+
+    if data is None:
+        data = _repair_nested_turns(text)
+        if data: log.debug("repair: nested turns / duplicate content keys")
 
     if data is None:
         data = _repair_stray_punctuation(text)
