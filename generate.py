@@ -71,6 +71,7 @@ LM_BASE      = "http://localhost:1234"
 API_V1       = f"{LM_BASE}/api/v1"
 API_OAI      = f"{LM_BASE}/v1"
 TEMPERATURE  = 0.87
+CPU_THREADS  = 8
 MAX_TOKENS   = 2048
 CTX_LENGTH   = 4096
 REQ_TIMEOUT  = 180
@@ -911,15 +912,39 @@ def _repair_unescaped_inner_quotes(text: str) -> Optional[dict]:
     """
     Fix: "content": "She said "hello" to him"
     Escapes unescaped double quotes found inside content/role string values.
+
+    Normalises by un-escaping any existing \\" first, then re-escaping all
+    interior quotes, so we don't accidentally double-escape already-escaped ones.
     """
+    def _normalize(m: re.Match) -> str:
+        prefix = m.group(1)
+        body   = m.group(2)
+        suffix = m.group(3)
+        # Un-escape all \" → " first, then re-escape all " → \"
+        body_clean   = body.replace('\\"', '"')
+        body_escaped = body_clean.replace('"', '\\"')
+        return prefix + body_escaped + suffix
+
     fixed = re.sub(
         r'("(?:content|role)"\s*:\s*")(.*?)("(?:\s*[,}\]]))',
-        lambda m: m.group(1) + m.group(2).replace('"', '\\"') + m.group(3),
+        _normalize,
         text,
         flags=re.DOTALL,
     )
     if fixed != text:
-        return _try_parse(fixed)
+        r = _try_parse(fixed)
+        if r:
+            return r
+
+    # Greedy fallback — catches content fields with multiple unescaped quotes
+    fixed2 = re.sub(
+        r'("(?:content|role)"\s*:\s*")(.*)((?:\s*"(?:\s*[,}\]]))+)',
+        _normalize,
+        text,
+        flags=re.DOTALL,
+    )
+    if fixed2 != text and fixed2 != fixed:
+        return _try_parse(fixed2)
     return None
 
 
@@ -955,6 +980,165 @@ def _repair_embedded_json_in_content(text: str) -> Optional[dict]:
         return _try_parse(fixed)
     return None
 
+
+def _repair_fence_escaped_quote(text: str) -> Optional[dict]:
+    """
+    Fix: closing code fence followed by an incorrectly escaped quote.
+
+    The model writes  ```\\"  when it means to close the JSON string with
+    ```"  (the triple-backtick closes the code block, then the unescaped "
+    closes the JSON field value).  The escaped \\" is interpreted as a
+    literal " inside the string, so the JSON string keeps running past the
+    intended boundary and swallows the following JSON structure.
+
+    Pattern:  ```\\"  →  ```"   (for any fence length ≥ 3)
+    """
+    fixed = re.sub(r'(`{3,}(?:\w*)\s*)\\"', r'\1"', text)
+    if fixed != text:
+        return _try_parse(fixed)
+    return None
+
+
+def _repair_literal_newlines(text: str) -> Optional[dict]:
+    """
+    Escape literal newline / carriage-return characters that appear inside
+    JSON string values.
+
+    Small models sometimes output actual newlines inside strings instead of
+    the JSON escape sequences \\n / \\r, making the document immediately
+    invalid.  This scanner tracks string boundaries (respecting \\ escape
+    sequences) and replaces bare newlines only when inside a string.
+    """
+    result:   list = []
+    in_str    = False
+    i         = 0
+    while i < len(text):
+        ch = text[i]
+        if in_str:
+            if ch == '\\':
+                # Copy the escape sequence verbatim
+                result.append(ch)
+                i += 1
+                if i < len(text):
+                    result.append(text[i])
+                    i += 1
+                continue
+            elif ch == '"':
+                in_str = False
+                result.append(ch)
+            elif ch == '\n':
+                result.append('\\n')
+            elif ch == '\r':
+                result.append('\\r')
+            else:
+                result.append(ch)
+        else:
+            if ch == '"':
+                in_str = True
+                result.append(ch)
+            else:
+                result.append(ch)
+        i += 1
+    fixed = ''.join(result)
+    if fixed != text:
+        return _try_parse(fixed)
+    return None
+
+
+def _repair_stray_punctuation(text: str) -> Optional[dict]:
+    """
+    Fix a stray sentence-ending punctuation character (. ! ?) that appears
+    immediately after the closing quote of a JSON string value, before a
+    structural delimiter (, } ]).
+
+    E.g.  "content": "...code\\n```".   →   "content": "...code\\n```"
+          "content": "Done!".\\n  },    →   "content": "Done!"\\n  },
+
+    A bare . ! ? > after a string close is never valid JSON.
+    """
+    fixed = re.sub(r'"([.!?>])(\s*[,}\]])', r'"\2', text)
+    if fixed != text:
+        return _try_parse(fixed)
+    return None
+
+
+def _repair_multi_pass(text: str) -> Optional[dict]:
+    """
+    Apply several cheap text-level fixes in one combined pass.
+
+    Some outputs have multiple simultaneous issues (e.g. trailing commas AND
+    stray punctuation) that individually leave the JSON still broken, so each
+    single-issue repair returns None and the entry is logged as a failure.
+    This function chains all the cheap textual fixups together and attempts a
+    parse on the combined result.
+
+    Fixes applied in order:
+      1. Trailing commas   (,} or ,])
+      2. Stray punctuation (. ! ? > after closing string quote)
+      3. Fence-escaped quote  (```\\" → ```")
+      4. Invalid escape sequences
+    """
+    t = re.sub(r",(\s*[}\]])", r"\1", text)                     # trailing commas
+    t = re.sub(r'"([.!?>])(\s*[,}\]])', r'"\2', t)              # stray punctuation
+    t = re.sub(r'(`{3,}(?:\w*)\s*)\\"', r'\1"', t)              # fence escaped quote
+    t = re.sub(r'\\([^"\\\\/bfnrtu\n\r])', r'\1', t)            # invalid escapes
+    if t != text:
+        return _try_parse(t)
+    return None
+
+
+def _repair_invalid_escape_sequences(text: str) -> Optional[dict]:
+    """
+    Remove backslashes before characters that are not valid JSON escape
+    targets ( " \\ / b f n r t u ).
+
+    E.g.  {\\  →  {   (lone backslash before space, common in Rust code blocks)
+    """
+    fixed = re.sub(r'\\([^"\\\\/bfnrtu\n\r])', r'\1', text)
+    if fixed != text:
+        return _try_parse(fixed)
+    return None
+
+
+def _repair_markdown_before_string(text: str) -> Optional[dict]:
+    """
+    Fix markdown emphasis markers that appear outside (before) the opening
+    quote of a JSON string value.
+
+    The model writes:  "content": **"AHA MOMENT...text."
+    But should write:  "content": "**AHA MOMENT...text."
+
+    The markers (* ** __ etc.) belong inside the string; placing them before
+    the opening quote produces an invalid JSON value.
+    """
+    fixed = re.sub(
+        r'("(?:content|role)"\s*:\s+)([*_]{1,3})(")',
+        r'\1\3\2',
+        text,
+    )
+    if fixed != text:
+        return _try_parse(fixed)
+    return None
+
+
+def _repair_stray_quote_after_number(text: str) -> Optional[dict]:
+    """
+    Fix a stray double-quote that appears right after a numeric JSON value.
+
+    Some models append \\" after integer values in key-value pairs, e.g.:
+      "turn_number": 135602"    →   "turn_number": 135602
+      "id": 7"                  →   "id": 7
+
+    The pattern is safe to apply: a digit followed by \" is never valid JSON
+    in a value position; the repair only fires when followed by a structural
+    delimiter (,  }  ]) confirming we are in a value context.
+    """
+    fixed = re.sub(r'("[\w]+"\s*:\s*)(\d+)"(\s*[,}\]])', r'\1\2\3', text)
+    if fixed != text:
+        return _try_parse(fixed)
+    return None
+
+
 def _validate_and_fix_turns(turns: list) -> Optional[list]:
     """
     Given a list of raw turn dicts:
@@ -973,8 +1157,12 @@ def _validate_and_fix_turns(turns: list) -> Optional[list]:
     for t in turns:
         if not isinstance(t, dict):
             continue
-        role    = _normalize_role(str(t.get("role", "")))
-        content = str(t.get("content", "")).strip()
+        role        = _normalize_role(str(t.get("role", "")))
+        raw_content = t.get("content", "")
+        if isinstance(raw_content, list):
+            content = "\n\n".join(str(item).strip() for item in raw_content if str(item).strip())
+        else:
+            content = str(raw_content).strip()
         if role not in ("user", "assistant"):
             continue
         if len(content) < 4:
@@ -1114,18 +1302,25 @@ def repair_and_parse(raw: str) -> Optional[dict]:
     Steps (applied in order, stops at first successful parse):
       1.  Strip markdown fences, extract outermost JSON object
       2.  Straight json.loads
-      3.  Trailing comma removal  (JS habit: [...,] or {...,})
-      4.  Single-quote coercion   (Python dict style)
-      5.  Mixed escaping fix      (partial \" sequences)
-      6.  Missing turn-close brace (with or without preceding comma)
-      7.  Truncation repair       (hit max_tokens mid-output)
-      8.  Unescaped inner quotes  (content contains raw ")
-      9.  Embedded JSON in content (unescaped {} inside strings)
-      10. Outer wrapper           ({ {"turns":[...]} })
+      3.  Stray quote after number     ("key": 123" → "key": 123)
+      4.  Trailing comma removal       (JS habit: [...,] or {...,})
+      5.  Single-quote coercion        (Python dict style)
+      6.  Literal newlines in strings  (bare \\n inside JSON string values)
+      6.  Mixed escaping fix           (partial \\" sequences)
+      7.  Closing fence escaped quote  (```\\" → ```")
+      8.  Invalid escape sequences     (\\ before non-special chars)
+      9.  Truncation repair            (hit max_tokens mid-output)
+      10. Missing turn-close brace     (with or without preceding comma)
+      11. Unescaped inner quotes       (content contains raw ")
+      12. Stray sentence punctuation   (. ! ? > after string close)
+      12b.Multi-pass combined fixes    (trailing comma + stray punct + fence quote + invalid esc)
+      13. Embedded JSON in content     (unescaped {} inside strings)
+      14. Outer wrapper                ({ {"turns":[...]} })
       Post-parse:
-      11. Fused-turn expansion    (duplicate role/content keys)
-      12. Nested wrapper unwrap   ({"conversation":{"turns":[...]}})
-      13. Turn validation + alternation fix
+      15. Fused-turn expansion    (duplicate role/content keys)
+      16. Nested wrapper unwrap   ({"conversation":{"turns":[...]}})
+      17. Turn validation + alternation fix
+          (also joins list-valued content fields)
     """
     text = _FENCE.sub("", raw.strip())
     text = _extract_json_object(text)
@@ -1133,6 +1328,14 @@ def repair_and_parse(raw: str) -> Optional[dict]:
         return None
 
     data = _try_parse(text)
+
+    if data is None:
+        data = _repair_stray_quote_after_number(text)
+        if data: log.debug("repair: stray quote after number")
+
+    if data is None:
+        data = _repair_markdown_before_string(text)
+        if data: log.debug("repair: markdown markers before string")
 
     if data is None:
         data = _repair_trailing_comma(text)
@@ -1143,8 +1346,20 @@ def repair_and_parse(raw: str) -> Optional[dict]:
         if data: log.debug("repair: single quotes")
 
     if data is None:
+        data = _repair_literal_newlines(text)
+        if data: log.debug("repair: literal newlines in strings")
+
+    if data is None:
         data = _repair_mixed_escaping(text)
         if data: log.debug("repair: mixed escaping")
+
+    if data is None:
+        data = _repair_fence_escaped_quote(text)
+        if data: log.debug("repair: fence escaped quote")
+
+    if data is None:
+        data = _repair_invalid_escape_sequences(text)
+        if data: log.debug("repair: invalid escape sequences")
 
     if data is None:
         data = _repair_truncated(text)
@@ -1157,6 +1372,14 @@ def repair_and_parse(raw: str) -> Optional[dict]:
     if data is None:
         data = _repair_unescaped_inner_quotes(text)
         if data: log.debug("repair: unescaped inner quotes")
+
+    if data is None:
+        data = _repair_stray_punctuation(text)
+        if data: log.debug("repair: stray punctuation after string")
+
+    if data is None:
+        data = _repair_multi_pass(text)
+        if data: log.debug("repair: multi-pass combined fixes")
 
     if data is None:
         data = _repair_embedded_json_in_content(text)
