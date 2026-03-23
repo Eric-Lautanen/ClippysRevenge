@@ -935,6 +935,10 @@ def _repair_unescaped_inner_quotes(text: str) -> Optional[dict]:
         r = _try_parse(fixed)
         if r:
             return r
+        # Inner quotes fixed but still broken (e.g. also missing closing ]} )
+        r = _repair_truncated(fixed)
+        if r:
+            return r
 
     # Greedy fallback — catches content fields with multiple unescaped quotes
     fixed2 = re.sub(
@@ -944,7 +948,10 @@ def _repair_unescaped_inner_quotes(text: str) -> Optional[dict]:
         flags=re.DOTALL,
     )
     if fixed2 != text and fixed2 != fixed:
-        return _try_parse(fixed2)
+        r = _try_parse(fixed2)
+        if r:
+            return r
+        return _repair_truncated(fixed2)
     return None
 
 
@@ -1041,7 +1048,12 @@ def _repair_literal_newlines(text: str) -> Optional[dict]:
         i += 1
     fixed = ''.join(result)
     if fixed != text:
-        return _try_parse(fixed)
+        r = _try_parse(fixed)
+        if r:
+            return r
+        # Literal newlines fixed but parse still fails — try also escaping
+        # unescaped inner quotes on the newline-corrected text.
+        return _repair_unescaped_inner_quotes(fixed)
     return None
 
 
