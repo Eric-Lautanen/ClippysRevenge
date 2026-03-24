@@ -425,8 +425,9 @@ class PromptVariator:
             f"Topic: {cat['topic']}\n"
             f"Description: {cat['description']}\n"
             f"Category guidance: {cat['system_hint']}\n\n"
-            f"IMPORTANT: Do NOT use backticks, code blocks, or any formatted code whatsoever. "
-            f"No backticks anywhere. Plain English only.\n\n"
+            f"IMPORTANT: No multi-line code blocks or triple backticks. "
+            f"Name specific Rust types, traits, and crates naturally in sentences. "
+            f"Be concrete and specific — vague answers are worse than named types.\n\n"
             f"Output raw JSON only:\n"
             f'{{"category":"{cat["subcategory"]}","topic":"{cat["topic"]}","turns":[...]}}'
         )
@@ -583,8 +584,10 @@ SYS_PROMPT = (
     '- Schema: {"category":"...","topic":"...","turns":['
     '{"role":"user","content":"..."},{"role":"assistant","content":"..."}]}\n'
     "- Turns strictly alternate user/assistant, starting with user.\n"
-    "- NEVER include code blocks, inline code, backtick-formatted text, or any formatted code. "
-    "Do not use backticks at all. Explain everything in plain English only.\n"
+    "- NEVER include multi-line code blocks or triple backticks. No fenced code blocks ever.\n"
+    "- You MAY naturally name Rust types, traits, crates, and identifiers inline in sentences "
+    "(e.g. 'the Json wrapper', 'serde_json::Value', 'impl Serialize') without formatting them. "
+    "Explain concepts in plain English but be specific — name the actual types and functions.\n"
     "- This is a Rust conversation. Keep all discussion focused on Rust. Do not explain or "
     "demonstrate concepts in other languages. References to other languages should only appear "
     "as brief comparisons, never as the main explanation.\n"
