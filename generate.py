@@ -734,6 +734,11 @@ def stream_completion(
 _FENCE        = re.compile(r"^```(?:json)?\s*|\s*```$", re.MULTILINE)
 _SINGLE_QUOTE = re.compile(r"(?<!\\)'")   # naive single-quote swap
 
+# Schema key sets used for pre-parse filtering and post-parse stripping
+_TURN_KEYS  = frozenset({"role", "content"})
+_ROOT_KEYS  = frozenset({"category", "topic", "turns"})
+_ALL_SCHEMA = _TURN_KEYS | _ROOT_KEYS
+
 # Role name aliases the model might use instead of "user"/"assistant"
 _ROLE_ALIASES = {
     "human":       "user",
@@ -802,6 +807,67 @@ def _extract_json_object(text: str) -> str:
         return text
     return extracted
 
+def _preprocess_schema_and_quotes(text: str) -> str:
+    """
+    Universal pre-parse cleanup run on every output before repair logic.
+
+    1a. Stray backslash-newline before a JSON key → close string + comma
+        (fused-turn pattern: model emitted content ending with \\ before next turn key)
+    1.  Remaining stray backslash-newlines → bare newline
+    2.  Drop non-schema scalar fields — any key not in {role,content,category,topic,turns}
+        whose value is a JSON scalar (true/false/null/number) is silently removed.
+        An optional trailing stray " (e.g. "turn_count": 107") is also consumed.
+    3.  Wrap unquoted string values for content/role — if the value after the colon
+        does not start with " / [ / {, wrap it in double-quotes (escaping internals).
+    4.  Insert missing closing quote for content/role values that end a line
+        without closing their string.
+    """
+    # 1a. Stray backslash-newline before a JSON key → close string + comma
+    #     Handles fused turns where model ended content with \ before next turn's key.
+    #     Must run before step 1 so the \ is still present for matching.
+    t = re.sub(
+        r'\\\n(\s*"(?:role|content)"\s*:)',
+        lambda m: '",\n' + m.group(1),
+        text,
+    )
+
+    # 1. Remaining stray backslash-newlines → bare newline (truncation / other cases)
+    t = re.sub(r'\\\n', '\n', t)
+
+    # 2. Drop non-schema scalar fields
+    def _maybe_strip(m: re.Match) -> str:
+        return '' if m.group(1) not in _ALL_SCHEMA else m.group(0)
+    t = re.sub(
+        r',\s*"([^"]+)"\s*:\s*(?:true|false|null|-?\d+(?:\.\d+)?)"?',
+        _maybe_strip,
+        t,
+    )
+
+    # 3. Wrap unquoted string values for content/role (single-line values only)
+    def _wrap_value(m: re.Match) -> str:
+        key_part = m.group(1)
+        raw_val  = m.group(2).strip()
+        # Escape bare " only — leave already-escaped \" sequences untouched
+        safe = re.sub(r'(?<!\\)"', '\\"', raw_val)
+        return key_part + '"' + safe + '"'
+    t = re.sub(
+        r'("(?:content|role)"\s*:\s*)([^"\[\{\n\s][^\n]*)',
+        _wrap_value,
+        t,
+    )
+
+    # 4. Insert missing closing quote for content/role values that end a line
+    #    without closing their string (e.g.  "content": "...```\n    },)
+    #    Pattern uses the non-backtracking form [^"\\\n]*(?:\\.[^"\\\n]*)* to
+    #    avoid catastrophic backtracking on content strings with many backslashes.
+    t = re.sub(
+        r'("(?:content|role)"\s*:\s*"[^"\\\n]*(?:\\.[^"\\\n]*)*)\n(\s*},?)',
+        lambda m: m.group(1) + '"\n' + m.group(2),
+        t,
+    )
+    return t
+
+
 def _repair_truncated(text: str) -> Optional[dict]:
     """
     Try progressively more aggressive closings for truncated JSON.
@@ -814,6 +880,7 @@ def _repair_truncated(text: str) -> Optional[dict]:
         '"}]}',      # cut mid-string inside a turn content field
         '..."}]}',   # same, with ellipsis to signal truncation
         '"}, {"role": "assistant", "content": "..."}]}',  # cut mid-user-turn
+        '": ""}]}',  # cut mid-key name (e.g. {"role  or  {"cont)
         ']}}',
         '}}',
     ]
@@ -1069,6 +1136,10 @@ def _repair_literal_newlines(text: str) -> Optional[dict]:
     fixed = ''.join(result)
     if fixed != text:
         r = _try_parse(fixed)
+        if r:
+            return r
+        # Literal newlines fixed but JSON still truncated
+        r = _repair_truncated(fixed)
         if r:
             return r
         # Literal newlines fixed but parse still fails — also escape any
@@ -1364,6 +1435,22 @@ def _repair_outer_wrapper(text: str) -> Optional[dict]:
     return None
 
 
+def _repair_extra_brace(text: str) -> Optional[dict]:
+    """
+    Remove one or two stray closing characters (} or ]) appended after the
+    root object close.  Handles e.g. {...}}} or {...]}}.
+    """
+    t = text.rstrip()
+    for trim in (1, 2):
+        candidate = t[:-trim].rstrip()
+        if not candidate:
+            continue
+        r = _try_parse(candidate)
+        if r:
+            return r
+    return None
+
+
 def _close_json(text: str) -> str:
     """
     Compute the minimal closing suffix needed to make an incomplete JSON
@@ -1531,6 +1618,8 @@ def repair_and_parse(raw: str) -> Optional[dict]:
     if not text:
         return None
 
+    text = _preprocess_schema_and_quotes(text)
+
     data = _try_parse(text)
 
     if data is None:
@@ -1602,6 +1691,10 @@ def repair_and_parse(raw: str) -> Optional[dict]:
         if data: log.debug("repair: outer wrapper")
 
     if data is None:
+        data = _repair_extra_brace(text)
+        if data: log.debug("repair: extra closing brace/bracket")
+
+    if data is None:
         return None
 
     # Fused turn expansion — always run, only adopt if it found more turns
@@ -1614,6 +1707,7 @@ def repair_and_parse(raw: str) -> Optional[dict]:
             log.debug(f"repair: fused turns ({len(turns_before)} → {len(fused)})")
 
     data  = _unwrap_nested(data)
+    data  = {k: v for k, v in data.items() if k in _ROOT_KEYS}
     turns = _validate_and_fix_turns(data.get("turns"))
     if turns is None:
         return None
