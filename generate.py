@@ -940,18 +940,38 @@ def _repair_unescaped_inner_quotes(text: str) -> Optional[dict]:
         if r:
             return r
 
-    # Greedy fallback — catches content fields with multiple unescaped quotes
+    # Greedy without DOTALL — safer than DOTALL because .* cannot cross the
+    # actual newlines that separate turns, so each content field is matched
+    # and normalised independently.  Works whenever content has no embedded
+    # literal newlines (i.e. after _repair_literal_newlines has run, or for
+    # models that already use \n escape sequences).
     fixed2 = re.sub(
         r'("(?:content|role)"\s*:\s*")(.*)((?:\s*"(?:\s*[,}\]]))+)',
         _normalize,
         text,
-        flags=re.DOTALL,
+        # intentionally NO re.DOTALL
     )
     if fixed2 != text and fixed2 != fixed:
         r = _try_parse(fixed2)
         if r:
             return r
-        return _repair_truncated(fixed2)
+        r = _repair_truncated(fixed2)
+        if r:
+            return r
+
+    # Greedy WITH DOTALL — last resort for content that still contains embedded
+    # actual newlines (can span across turns; accepts garbage risk).
+    fixed3 = re.sub(
+        r'("(?:content|role)"\s*:\s*")(.*)((?:\s*"(?:\s*[,}\]]))+)',
+        _normalize,
+        text,
+        flags=re.DOTALL,
+    )
+    if fixed3 != text and fixed3 != fixed and fixed3 != fixed2:
+        r = _try_parse(fixed3)
+        if r:
+            return r
+        return _repair_truncated(fixed3)
     return None
 
 
@@ -1051,8 +1071,35 @@ def _repair_literal_newlines(text: str) -> Optional[dict]:
         r = _try_parse(fixed)
         if r:
             return r
-        # Literal newlines fixed but parse still fails — try also escaping
+        # Literal newlines fixed but parse still fails — also escape any
         # unescaped inner quotes on the newline-corrected text.
+        #
+        # After escaping literal newlines, content fields contain no actual
+        # newline characters (they became two-char \n sequences).  The greedy
+        # regex WITHOUT re.DOTALL is therefore safe: .* cannot cross the actual
+        # newlines that separate turns, so each content field is matched and
+        # normalised independently without spanning the whole document.
+        def _norm_iq(m: re.Match) -> str:
+            prefix = m.group(1)
+            body   = m.group(2)
+            suffix = m.group(3)
+            body_clean   = body.replace('\\"', '"')
+            body_escaped = body_clean.replace('"', '\\"')
+            return prefix + body_escaped + suffix
+
+        iq = re.sub(
+            r'("(?:content|role)"\s*:\s*")(.*)((?:\s*"(?:\s*[,}\]]))+)',
+            _norm_iq,
+            fixed,        # intentionally NO re.DOTALL — see above
+        )
+        if iq != fixed:
+            r = _try_parse(iq)
+            if r:
+                return r
+            r = _repair_truncated(iq)
+            if r:
+                return r
+        # Broader fallback (handles remaining edge cases)
         return _repair_unescaped_inner_quotes(fixed)
     return None
 
@@ -1090,13 +1137,23 @@ def _repair_multi_pass(text: str) -> Optional[dict]:
       3. Fence-escaped quote  (```\\" → ```")
       4. Invalid escape sequences
     """
-    t = re.sub(r",(\s*[}\]])", r"\1", text)                     # trailing commas
+    t = re.sub(r",(\s*[}\]])", r"\1", text)                      # trailing commas
     t = re.sub(r'"([.!?>])(\s*[,}\]])', r'"\2', t)              # stray punctuation
     t = re.sub(r'(`{3,}(?:\w*)\s*)\\"', r'\1"', t)              # fence escaped quote
     t = re.sub(r'\\([^"\\\\/bfnrtu\n\r])', r'\1', t)            # invalid escapes
-    if t != text:
-        return _try_parse(t)
-    return None
+    # Extra fields injected by some models:
+    t = re.sub(r',\s*"turn_number"\s*:\s*\d+\\n?', '', t)       # "turn_number": N  (+ stray \n)
+    t = re.sub(r',\s*"id"\s*:\s*\d+\\n?', '', t)                # "id": N
+    # Python-style triple-quote closer that leaks out of a JSON string:
+    #   "content": ".../// """\n    },  →  "content": ".../// "\n    },
+    t = re.sub(r'"""(\s*[,}\]])', r'"\1', t)
+    if t == text:
+        return None
+    r = _try_parse(t)
+    if r:
+        return r
+    # Combined text fixes may still leave unescaped inner quotes — try those too
+    return _repair_unescaped_inner_quotes(t)
 
 
 def _repair_invalid_escape_sequences(text: str) -> Optional[dict]:
