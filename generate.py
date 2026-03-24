@@ -822,23 +822,34 @@ def _preprocess_schema_and_quotes(text: str) -> str:
     4.  Insert missing closing quote for content/role values that end a line
         without closing their string.
     """
+    # 0. Inline duplicate turn-close brace: model wrote "...content"}\n    },
+    #    The } right after the closing " is a stray inline turn-close; the
+    #    authoritative close is the },  on the next line.  Strip the inline }.
+    t = re.sub(r'"}\n(\s+},)', lambda m: '"\n' + m.group(1), text)
+
     # 1a. Stray backslash-newline before a JSON key → close string + comma
     #     Handles fused turns where model ended content with \ before next turn's key.
     #     Must run before step 1 so the \ is still present for matching.
     t = re.sub(
         r'\\\n(\s*"(?:role|content)"\s*:)',
         lambda m: '",\n' + m.group(1),
-        text,
+        t,
     )
 
     # 1. Remaining stray backslash-newlines → bare newline (truncation / other cases)
     t = re.sub(r'\\\n', '\n', t)
 
     # 2. Drop non-schema scalar fields
+    #    The optional (?P<trail>\\n\s*) captures a literal \n (two chars: \ + n)
+    #    that some models emit before the closing } of the turn object
+    #    (e.g. "turn_number": 1\n    }).  When present we emit a real newline
+    #    so the } that follows lands as a proper JSON object close.
     def _maybe_strip(m: re.Match) -> str:
-        return '' if m.group(1) not in _ALL_SCHEMA else m.group(0)
+        if m.group(1) in _ALL_SCHEMA:
+            return m.group(0)
+        return '\n' if m.group('trail') else ''
     t = re.sub(
-        r',\s*"([^"]+)"\s*:\s*(?:true|false|null|-?\d+(?:\.\d+)?)"?',
+        r',\s*"([^"]+)"\s*:\s*(?:true|false|null|-?\d+(?:\.\d+)?)"?(?P<trail>\\n\s*)?',
         _maybe_strip,
         t,
     )
@@ -1443,6 +1454,43 @@ def _repair_outer_wrapper(text: str) -> Optional[dict]:
     return None
 
 
+_BARE_TURN_RE = re.compile(
+    r'\n(\s*)"(user|assistant)"\s*:\s*"([^"\\\n]*(?:\\.[^"\\\n]*)*)"\n\s*\}(,?)',
+)
+
+
+def _repair_bare_role_turns(text: str) -> Optional[dict]:
+    """
+    Repairs conversations where the model switched mid-way to a bare key-value
+    turn format — "user": "message" or "assistant": "message" — instead of
+    proper objects {"role":"...","content":"..."}, often following a premature
+    ],  that closed the turns array early.
+
+    Steps:
+    1. Remove any early ],  that precedes a bare turn line (keeps the ,)
+    2. Convert each bare turn to a proper {"role":..., "content":...} object
+    """
+    if not _BARE_TURN_RE.search(text):
+        return None
+
+    # Step 1: Remove premature ],  that precedes a bare turn
+    t = re.sub(r'\],(\n\s*"(?:user|assistant)"\s*:)', r',\1', text)
+
+    # Step 2: Convert bare turns to proper turn objects
+    def _fix_bare(m: re.Match) -> str:
+        indent    = m.group(1)
+        role      = m.group(2)
+        content   = m.group(3)
+        separator = m.group(4)   # ',' or ''
+        return f'\n{indent}{{"role": "{role}", "content": "{content}"}}{separator}'
+
+    t, n = _BARE_TURN_RE.subn(_fix_bare, t)
+    if n == 0:
+        return None
+
+    return _try_parse(t) or _repair_trailing_comma(t)
+
+
 def _repair_extra_brace(text: str) -> Optional[dict]:
     """
     Remove one or two stray closing characters (} or ]) appended after the
@@ -1697,6 +1745,10 @@ def repair_and_parse(raw: str) -> Optional[dict]:
     if data is None:
         data = _repair_outer_wrapper(text)
         if data: log.debug("repair: outer wrapper")
+
+    if data is None:
+        data = _repair_bare_role_turns(text)
+        if data: log.debug("repair: bare role→content turns")
 
     if data is None:
         data = _repair_extra_brace(text)
