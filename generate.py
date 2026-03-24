@@ -847,9 +847,17 @@ def _preprocess_schema_and_quotes(text: str) -> str:
     def _wrap_value(m: re.Match) -> str:
         key_part = m.group(1)
         raw_val  = m.group(2).strip()
+        # Strip trailing field separator comma captured by [^\n]* (preserve it)
+        suffix = ''
+        if raw_val.endswith(','):
+            suffix   = ','
+            raw_val  = raw_val[:-1].rstrip()
+        # Strip trailing stray " added by model (no matching open ") — but not \"
+        if raw_val.endswith('"') and not raw_val.endswith('\\"'):
+            raw_val = raw_val[:-1].rstrip()
         # Escape bare " only — leave already-escaped \" sequences untouched
         safe = re.sub(r'(?<!\\)"', '\\"', raw_val)
-        return key_part + '"' + safe + '"'
+        return key_part + '"' + safe + '"' + suffix
     t = re.sub(
         r'("(?:content|role)"\s*:\s*)([^"\[\{\n\s][^\n]*)',
         _wrap_value,
