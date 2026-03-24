@@ -2,25 +2,23 @@
 """
 ╔══════════════════════════════════════════════════════════╗
 ║         RustScrape  —  Rust Training Data Collector      ║
-║  crates.io · rust-lang GitHub · Docs · URLO Forum        ║
+║        crates.io · rust-lang GitHub · Official Docs      ║
 ╚══════════════════════════════════════════════════════════╝
 
-Collects high-quality Rust source data from four sources:
+Collects high-quality Rust source data from three sources:
 
-  1. crates.io       — Top N crates by downloads, extract all .rs files
-  2. GitHub          — rust-lang org repos + curated ecosystem crates
-  3. Docs            — The Rust Book, Reference, Nomicon, RFCs (markdown)
-  4. URLO            — users.rust-lang.org forum threads (Discourse API)
+  1. crates.io  — Top N crates by downloads, extract all .rs files
+  2. GitHub     — rust-lang org repos + curated ecosystem crates
+  3. Docs       — The Rust Book, Reference, Nomicon, RFCs (markdown)
 
 Output: JSONL files per source in <output-dir>/
   ./rust_data/crates/    — one JSONL per crate
   ./rust_data/github/    — one JSONL per repo
   ./rust_data/docs/      — one JSONL per doc source
-  ./rust_data/forum/     — one JSONL per forum category
 
 Each record:
   {
-    "source":    "crates.io" | "github" | "docs" | "forum",
+    "source":    "crates.io" | "github" | "docs",
     "origin":    "tokio",
     "path":      "src/runtime/mod.rs",
     "content":   "...",
@@ -32,16 +30,15 @@ Requirements:
     pip install requests rich
 
 Usage:
-    python scrape.py crates  --top 500 --output-dir ./rust_data
-    python scrape.py github  --output-dir ./rust_data [--token ghp_xxx]
-    python scrape.py docs    --output-dir ./rust_data
-    python scrape.py forum   --output-dir ./rust_data --pages 500
-    python scrape.py all     --output-dir ./rust_data [--token ghp_xxx]
-    python scrape.py stats   --output-dir ./rust_data
+    python scraper.py crates  --top 500 --output-dir ./rust_data
+    python scraper.py github  --output-dir ./rust_data [--token ghp_xxx]
+    python scraper.py docs    --output-dir ./rust_data
+    python scraper.py all     --output-dir ./rust_data [--token ghp_xxx]
+    python scraper.py stats   --output-dir ./rust_data
 
 GitHub token (optional but strongly recommended — raises limit from 60 to 5000 req/hr):
     export GITHUB_TOKEN=ghp_yourtoken
-    python scrape.py github --output-dir ./rust_data
+    python scraper.py github --output-dir ./rust_data
 """
 
 from __future__ import annotations
@@ -97,13 +94,10 @@ log = logging.getLogger("rustscrape")
 CRATES_API       = "https://crates.io/api/v1"
 CRATES_CDN       = "https://static.crates.io/crates"
 GITHUB_API       = "https://api.github.com"
-URLO_API         = "https://users.rust-lang.org"
-
 USER_AGENT       = "rust-training-scraper/1.0 (research; contact via github)"
 CRATES_API_DELAY = 1.1      # seconds between crates.io API calls (crawlers policy)
-GITHUB_DELAY     = 0.3      # seconds between GitHub API calls
-FORUM_DELAY      = 1.0      # seconds between URLO API calls
-CDN_DELAY        = 0.1      # CDN has no rate limit but be polite
+GITHUB_DELAY     = 0.5      # seconds between GitHub API calls
+CDN_DELAY        = 0.5      # seconds between crate tarball downloads — be polite
 DOWNLOAD_TIMEOUT = 60
 API_TIMEOUT      = 20
 MAX_FILE_BYTES   = 500_000  # skip files >500KB (usually generated or data files)
@@ -194,7 +188,7 @@ def output_path(output_dir: str, source: str, name: str) -> Path:
 
 def write_record(path: Path, record: dict) -> None:
     with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        f.write(json.dumps(record, ensure_ascii=True) + "\n")
 
 def make_record(
     source: str, origin: str, path: str, content: str, **extra
@@ -226,7 +220,7 @@ def make_session(github_token: Optional[str] = None) -> requests.Session:
 
 # Paths to skip — generated code, fixtures, test data, vendor dirs
 _SKIP_PATH_PARTS = {
-    "vendor", "node_modules", ".git", "target",
+    "vendor", "node_modules", ".git", ".github", "target",
     "generated", "gen", "proto",
 }
 _SKIP_PATH_SUFFIXES = {
@@ -344,33 +338,55 @@ def download_crate_tarball(
         log.warning(f"Download failed {name} {version}: {e}")
         return None
 
+# Doc files worth keeping from crate tarballs
+_DOC_STEMS = frozenset({"readme", "changelog", "changes", "contributing", "architecture", "design"})
+_DOC_EXTS  = frozenset({".md", ".rst", ".txt"})
+
+def _is_crate_doc(rel_path: str) -> bool:
+    """
+    True for README/CHANGELOG-style files and any markdown inside a docs/ or doc/ dir.
+    Skips .github/, benches/, test data, etc.
+    """
+    p    = Path(rel_path)
+    stem = p.stem.lower()
+    ext  = p.suffix.lower()
+    # Named documentation files at any depth (README.md, CHANGELOG.rst, etc.)
+    if stem in _DOC_STEMS and (ext in _DOC_EXTS or ext == ""):
+        return True
+    # Any markdown in a top-level docs/ or doc/ directory
+    if ext == ".md" and len(p.parts) > 1 and p.parts[0].lower() in {"docs", "doc"}:
+        return True
+    return False
+
 def extract_rs_files(tarball_bytes: bytes) -> Iterator[tuple[str, str]]:
     """
-    Yield (path, content) for every .rs file in a .crate tarball.
-    .crate files are gzipped tarballs.
+    Yield (path, content) for .rs source files AND documentation files
+    (README, CHANGELOG, docs/*.md) found in a .crate tarball.
     """
     try:
         with tarfile.open(fileobj=io.BytesIO(tarball_bytes), mode="r:gz") as tar:
             for member in tar.getmembers():
-                if not member.name.endswith(".rs"):
-                    continue
                 if not member.isfile():
+                    continue
+                is_rs  = member.name.endswith(".rs")
+                # Strip the crate-version prefix (e.g. tokio-1.35.0/src/lib.rs → src/lib.rs)
+                parts    = member.name.split("/", 1)
+                rel_path = parts[1] if len(parts) > 1 else member.name
+                is_doc = _is_crate_doc(rel_path)
+                if not (is_rs or is_doc):
                     continue
                 if member.size > MAX_FILE_BYTES or member.size < MIN_FILE_BYTES:
                     continue
-                # Strip the crate-version prefix from paths (e.g. tokio-1.35.0/src/lib.rs)
-                parts = member.name.split("/", 1)
-                rel_path = parts[1] if len(parts) > 1 else member.name
                 if should_skip_path(rel_path):
                     continue
                 try:
                     f = tar.extractfile(member)
                     if f is None:
                         continue
-                    raw = f.read()
-                    content = raw.decode("utf-8", errors="replace")
-                    if is_quality_rust(content):
-                        yield rel_path, content
+                    content = f.read().decode("utf-8", errors="replace")
+                    if is_rs and not is_quality_rust(content):
+                        continue
+                    yield rel_path, content
                 except Exception:
                     continue
     except Exception as e:
@@ -469,52 +485,113 @@ _RUSTLANG_REPOS = [
 
 # Curated ecosystem crates — the ones every Rust dev uses
 _ECOSYSTEM_REPOS = [
-    ("tokio-rs",    "tokio"),
-    ("tokio-rs",    "axum"),
-    ("serde-rs",    "serde"),
-    ("serde-rs",    "serde_json"),
-    ("hyperium",    "hyper"),
-    ("hyperium",    "http"),
-    ("rayon-rs",    "rayon"),
-    ("crossbeam-rs","crossbeam"),
-    ("dtolnay",     "thiserror"),
-    ("dtolnay",     "anyhow"),
-    ("dtolnay",     "syn"),
-    ("dtolnay",     "quote"),
-    ("dtolnay",     "proc-macro2"),
-    ("clap-rs",     "clap"),
-    ("BurntSushi",  "ripgrep"),          # exemplary real-world Rust CLI
-    ("BurntSushi",  "regex"),
-    ("rust-lang",   "regex"),
-    ("bitflags",    "bitflags"),
-    ("rust-num",    "num"),
-    ("smol-rs",     "smol"),
-    ("actix",       "actix-web"),
-    ("launchbadge", "sqlx"),
-    ("diesel-rs",   "diesel"),
-    ("nickel-org",  "nickel.rs"),
-    ("rusqlite",    "rusqlite"),
-    ("image-rs",    "image"),
-    ("rust-random", "rand"),
-    ("chronotope",  "chrono"),
-    ("uuid-rs",     "uuid"),
-    ("rust-itertools","itertools"),
-    ("softprops",   "once_cell"),
-    ("matklad",     "once_cell"),
-    ("mitsuhiko",   "minijinja"),
-    ("nix-rust",    "nix"),
+    # ── Async runtime & networking ───────────────────────────────────────────
+    ("tokio-rs",         "tokio"),
+    ("tokio-rs",         "axum"),
+    ("tokio-rs",         "tracing"),
+    ("tokio-rs",         "mio"),
+    ("hyperium",         "hyper"),
+    ("hyperium",         "http"),
+    ("hyperium",         "tonic"),           # gRPC
+    ("seanmonstar",      "reqwest"),          # most-used HTTP client
+    ("seanmonstar",      "warp"),
+    ("tower-rs",         "tower"),
+    ("tower-rs",         "tower-http"),
+    ("quinn-rs",         "quinn"),            # QUIC protocol
+    ("smol-rs",          "smol"),
+    ("actix",            "actix-web"),
+    ("cloudflare",       "quiche"),           # QUIC/HTTP3
+    # ── Serialization & parsing ──────────────────────────────────────────────
+    ("serde-rs",         "serde"),
+    ("serde-rs",         "serde_json"),
+    ("toml-rs",          "toml"),             # TOML (used everywhere)
+    ("Geal",             "nom"),              # foundational parser combinator
+    ("pest-parser",      "pest"),             # PEG parser
+    ("dtolnay",          "syn"),
+    ("dtolnay",          "quote"),
+    ("dtolnay",          "proc-macro2"),
+    ("dtolnay",          "serde-yaml"),
+    ("dtolnay",          "semver"),
+    ("messagerie-rs",    "postcard"),         # embedded serialization
+    # ── Error handling & diagnostics ────────────────────────────────────────
+    ("dtolnay",          "thiserror"),
+    ("dtolnay",          "anyhow"),
+    ("zkat",             "miette"),           # great diagnostic patterns
+    ("eyre-rs",          "eyre"),
+    # ── Concurrency & data structures ────────────────────────────────────────
+    ("rayon-rs",         "rayon"),
+    ("crossbeam-rs",     "crossbeam"),
+    ("tokio-rs",         "bytes"),            # widely used byte buffer
+    ("indexmap-rs",      "indexmap"),         # ordered hash map
+    ("contain-rs",       "fixedbitset"),
+    ("bluss",            "petgraph"),         # graph data structures
+    ("servo",            "rust-smallvec"),    # small vec optimisation
+    # ── Proc macros & codegen ────────────────────────────────────────────────
+    ("clap-rs",          "clap"),
+    ("bitflags",         "bitflags"),
+    ("rust-num",         "num"),
+    ("rust-itertools",   "itertools"),
+    ("matklad",          "once_cell"),
+    # ── Databases & storage ──────────────────────────────────────────────────
+    ("launchbadge",      "sqlx"),
+    ("diesel-rs",        "diesel"),
+    ("rusqlite",         "rusqlite"),
+    ("spacejam",         "sled"),             # embedded database
+    ("cberner",          "redb"),             # embedded database
+    # ── Crypto & security ────────────────────────────────────────────────────
+    ("rustls",           "rustls"),
+    ("sfackler",         "rust-openssl"),
+    ("dalek-cryptography","curve25519-dalek"),
+    ("RustCrypto",       "hashes"),
+    ("RustCrypto",       "signatures"),
+    # ── CLI tools — exemplary real-world Rust ────────────────────────────────
+    ("BurntSushi",       "ripgrep"),
+    ("BurntSushi",       "xsv"),             # CSV toolkit — clean idiomatic code
+    ("BurntSushi",       "regex"),
+    ("rust-lang",        "regex"),
+    ("sharkdp",          "bat"),
+    ("sharkdp",          "fd"),              # modern find replacement
+    ("sharkdp",          "hyperfine"),       # benchmarking tool
+    ("dandavison",       "delta"),           # git diff viewer
+    ("ajeetdsouza",      "zoxide"),          # smart cd
+    ("bootandy",         "dust"),            # du replacement
+    ("imsnif",           "bandwhich"),       # network utilisation
+    ("casey",            "just"),
+    ("XAMPPRocky",       "tokei"),
+    ("ogham",            "exa"),
+    ("crate-ci",         "typos"),           # spell checker — good string handling patterns
+    ("orhun",            "git-cliff"),       # changelog generator
+    # ── TUI & terminal ───────────────────────────────────────────────────────
+    ("extrawurst",       "gitui"),           # full git TUI application
+    ("zellij-org",       "zellij"),          # terminal multiplexer
+    ("ratatui-org",      "ratatui"),         # TUI framework (tui-rs successor)
+    # ── Editors & large applications ─────────────────────────────────────────
+    ("helix-editor",     "helix"),           # production editor — ~100k lines of clean Rust
+    ("starship",         "starship"),        # cross-platform shell prompt — tons of patterns
+    # ── Build tools & dev infrastructure ─────────────────────────────────────
+    ("LukeMathWalker",   "cargo-chef"),
+    ("mozilla",          "sccache"),         # shared compilation cache
+    ("rust-lang",        "crates.io"),       # the crates.io site itself is Rust
+    ("cargo-bins",       "cargo-binstall"),
+    # ── WebAssembly ──────────────────────────────────────────────────────────
     ("bytecodealliance", "wasmtime"),
-    ("rustwasm",    "wasm-bindgen"),
-    ("tokio-rs",    "tracing"),
-    ("tower-rs",    "tower"),
-    ("tower-rs",    "tower-http"),
-    ("sfackler",    "rust-openssl"),
-    ("rustls",      "rustls"),
-    ("LukeMathWalker", "cargo-chef"),
-    ("casey",       "just"),             # exemplary real-world tool
-    ("sharkdp",     "bat"),              # exemplary real-world tool
-    ("ogham",       "exa"),
-    ("XAMPPRocky",  "tokei"),
+    ("rustwasm",         "wasm-bindgen"),
+    ("rustwasm",         "wasm-pack"),
+    # ── Miscellaneous high-quality crates ────────────────────────────────────
+    ("image-rs",         "image"),
+    ("rust-random",      "rand"),
+    ("chronotope",       "chrono"),
+    ("uuid-rs",          "uuid"),
+    ("mitsuhiko",        "minijinja"),
+    ("nix-rust",         "nix"),
+    ("nickel-org",       "nickel.rs"),
+    ("Byron",            "gitoxide"),        # pure-Rust git implementation — very large, very clean
+    ("vectordotdev",     "vector"),          # data pipeline — enterprise-grade Rust
+    ("meilisearch",      "meilisearch"),     # search engine — large real-world app
+    ("alacritty",        "alacritty"),       # terminal emulator
+    ("rust-embedded",    "embedded-hal"),    # embedded systems abstraction
+    ("embassy-rs",       "embassy"),         # async embedded framework
+    ("smoltcp-rs",       "smoltcp"),         # bare-metal network stack
 ]
 
 def gh_headers_ok(session: requests.Session) -> bool:
@@ -653,9 +730,9 @@ def scrape_github(args: argparse.Namespace) -> None:
     # Build full repo list
     all_repos: list[tuple[str, str, bool]] = []   # (owner, repo, also_markdown)
     for repo in _RUSTLANG_REPOS:
-        all_repos.append(("rust-lang", repo, True))   # include .md for docs repos
+        all_repos.append(("rust-lang", repo, True))
     for owner, repo in _ECOSYSTEM_REPOS:
-        all_repos.append((owner, repo, False))
+        all_repos.append((owner, repo, True))   # include README/docs markdown for all repos
 
     to_scrape = [
         (o, r, md) for o, r, md in all_repos
@@ -705,17 +782,28 @@ def scrape_github(args: argparse.Namespace) -> None:
 
 # Each entry: (label, base_url, is_single_page)
 _DOC_SOURCES = [
-    ("rust-book",       "https://doc.rust-lang.org/book/",       False),
-    ("rust-reference",  "https://doc.rust-lang.org/reference/",  False),
-    ("rust-nomicon",    "https://doc.rust-lang.org/nomicon/",     False),
-    ("rust-async-book", "https://rust-lang.github.io/async-book/",False),
-    ("rust-edition-guide", "https://doc.rust-lang.org/edition-guide/", False),
-    ("rust-error-index","https://doc.rust-lang.org/error_codes/error-index.html", True),
-    ("rust-std-docs",   "https://doc.rust-lang.org/std/index.html", True),
+    # ── Official rust-lang docs ──────────────────────────────────────────────
+    ("rust-book",          "https://doc.rust-lang.org/book/",                    False),
+    ("rust-reference",     "https://doc.rust-lang.org/reference/",               False),
+    ("rust-nomicon",       "https://doc.rust-lang.org/nomicon/",                 False),
+    ("rust-async-book",    "https://rust-lang.github.io/async-book/",            False),
+    ("rust-edition-guide", "https://doc.rust-lang.org/edition-guide/",           False),
+    ("rust-cargo",         "https://doc.rust-lang.org/cargo/",                   False),
+    ("rust-clippy",        "https://doc.rust-lang.org/clippy/",                  False),
+    ("rust-error-index",   "https://doc.rust-lang.org/error_codes/error-index.html", True),
+    ("rust-std-docs",      "https://doc.rust-lang.org/std/index.html",           True),
+    # ── High-quality community books ────────────────────────────────────────
+    ("rust-patterns",      "https://rust-unofficial.github.io/patterns/",        False),
+    ("rust-too-many-lists","https://rust-unofficial.github.io/too-many-lists/",  False),
+    ("rust-tlborm",        "https://veykril.github.io/tlborm/",                  False),
+    ("rust-perf-book",     "https://nnethercote.github.io/perf-book/",           False),
+    ("rust-comprehensive", "https://google.github.io/comprehensive-rust/",       False),
+    ("rust-cookbook",      "https://rust-lang-nursery.github.io/rust-cookbook/", False),
 ]
 
-# Known chapter/section paths for each book (avoids scraping nav links)
-_BOOK_CHAPTERS = {
+# Known chapter/section paths for each book.
+# Books NOT listed here get auto-discovered from their index page.
+_BOOK_CHAPTERS: dict[str, list[str]] = {
     "rust-book": [
         "title-page.html","foreword.html","ch00-00-introduction.html",
         "ch01-00-getting-started.html","ch01-01-installation.html","ch01-02-hello-world.html","ch01-03-hello-cargo.html",
@@ -773,7 +861,146 @@ _BOOK_CHAPTERS = {
         "hrtb.html","exotic-sizes.html","conversions.html","coercions.html","dot-operator.html",
         "casts.html","transmutes.html","checked.html","uninitialized.html","ptr.html",
     ],
+    # The Reference — all major sections and sub-pages
+    "rust-reference": [
+        "introduction.html","notation.html","keywords.html","identifiers.html",
+        "comments.html","whitespace.html","tokens.html",
+        "macros.html","macros-by-example.html","procedural-macros.html",
+        "crates-and-source-files.html","conditional-compilation.html",
+        "items.html",
+        "items/modules.html","items/extern-crates.html","items/use-declarations.html",
+        "items/functions.html","items/type-aliases.html","items/structs.html",
+        "items/enumerations.html","items/unions.html","items/constant-items.html",
+        "items/static-items.html","items/traits.html","items/implementations.html",
+        "items/external-blocks.html","items/generics.html","items/associated-items.html",
+        "items/visibility-and-privacy.html",
+        "attributes.html",
+        "attributes/testing.html","attributes/derive.html","attributes/diagnostics.html",
+        "attributes/code-generation.html","attributes/limits.html","attributes/type_system.html",
+        "statements-and-expressions.html","statements.html","expressions.html",
+        "expressions/literal-expr.html","expressions/path-expr.html","expressions/block-expr.html",
+        "expressions/operator-expr.html","expressions/grouped-expr.html","expressions/array-expr.html",
+        "expressions/tuple-expr.html","expressions/struct-expr.html","expressions/call-expr.html",
+        "expressions/method-call-expr.html","expressions/field-expr.html","expressions/index-expr.html",
+        "expressions/range-expr.html","expressions/closure-expr.html","expressions/loop-expr.html",
+        "expressions/if-expr.html","expressions/match-expr.html","expressions/return-expr.html",
+        "expressions/await-expr.html","expressions/underscore-expr.html",
+        "patterns.html","type-system.html","types.html",
+        "types/boolean.html","types/numeric.html","types/textual.html","types/never.html",
+        "types/tuple.html","types/array.html","types/slice.html","types/struct.html",
+        "types/enum.html","types/union.html","types/function-item.html","types/closure.html",
+        "types/pointer.html","types/reference.html","types/fn.html",
+        "types/trait-object.html","types/impl-trait.html","types/parameters.html",
+        "dynamically-sized-types.html","type-layout.html","interior-mutability.html",
+        "subtyping.html","trait-bounds.html","type-coercions.html","destructors.html",
+        "lifetime-elision.html","special-types-and-traits.html",
+        "names.html","names/namespaces.html","names/scopes.html","names/name-resolution.html",
+        "names/paths.html","names/identifier-resolution.html","names/preludes.html",
+        "names/extern-prelude.html","names/tool-prelude.html",
+        "memory-model.html","linkage.html","inline-assembly.html","unsafety.html",
+        "behavior-considered-undefined.html","behavior-not-considered-unsafe.html",
+        "const-eval.html","application-binary-interface.html",
+        "influences.html","glossary.html",
+    ],
+    # Async Book
+    "rust-async-book": [
+        "01_getting_started/01_chapter.html","01_getting_started/02_why_async.html",
+        "01_getting_started/03_state_of_async_rust.html","01_getting_started/04_async_await_primer.html",
+        "02_execution/01_chapter.html","02_execution/02_future.html","02_execution/03_wakeups.html",
+        "02_execution/04_executor.html","02_execution/05_io.html",
+        "03_async_await/01_chapter.html",
+        "04_pinning/01_chapter.html",
+        "05_streams/01_chapter.html","05_streams/02_iteration_and_concurrency.html",
+        "06_multiple_futures/01_chapter.html","06_multiple_futures/02_join.html",
+        "06_multiple_futures/03_select.html","06_multiple_futures/04_spawning.html",
+        "07_workarounds/01_chapter.html","07_workarounds/02_return_type.html",
+        "07_workarounds/03_recursion.html","07_workarounds/04_async_in_traits.html",
+    ],
+    # Cargo Book — guide + reference + all commands
+    "rust-cargo": [
+        "index.html",
+        "getting-started/index.html","getting-started/installation.html","getting-started/first-steps.html",
+        "guide/index.html","guide/why-cargo-exists.html","guide/creating-a-new-project.html",
+        "guide/working-on-an-existing-project.html","guide/dependencies.html",
+        "guide/package-layout.html","guide/cargo-toml-vs-cargo-lock.html","guide/tests.html",
+        "guide/continuous-integration.html","guide/cargo-home.html","guide/build-cache.html",
+        "reference/index.html","reference/specifying-dependencies.html",
+        "reference/overriding-dependencies.html","reference/manifest.html",
+        "reference/workspaces.html","reference/features.html","reference/profiles.html",
+        "reference/configuration.html","reference/environment-variables.html",
+        "reference/build-scripts.html","reference/build-script-examples.html",
+        "reference/publishing.html","reference/package-id-spec.html",
+        "reference/source-replacement.html","reference/external-tools.html",
+        "reference/registries.html","reference/resolver.html","reference/semver.html",
+        "reference/future-incompat-report.html","reference/unstable.html",
+        "commands/index.html","commands/cargo.html",
+        "commands/cargo-bench.html","commands/cargo-build.html","commands/cargo-check.html",
+        "commands/cargo-clean.html","commands/cargo-doc.html","commands/cargo-fetch.html",
+        "commands/cargo-fix.html","commands/cargo-generate-lockfile.html","commands/cargo-help.html",
+        "commands/cargo-init.html","commands/cargo-install.html","commands/cargo-locate-project.html",
+        "commands/cargo-login.html","commands/cargo-logout.html","commands/cargo-metadata.html",
+        "commands/cargo-new.html","commands/cargo-owner.html","commands/cargo-package.html",
+        "commands/cargo-publish.html","commands/cargo-remove.html","commands/cargo-report.html",
+        "commands/cargo-run.html","commands/cargo-rustc.html","commands/cargo-rustdoc.html",
+        "commands/cargo-search.html","commands/cargo-test.html","commands/cargo-tree.html",
+        "commands/cargo-update.html","commands/cargo-vendor.html",
+        "commands/cargo-verify-project.html","commands/cargo-version.html","commands/cargo-yank.html",
+        "faq.html",
+    ],
+    # Rust Design Patterns — idioms, patterns, anti-patterns, functional
+    "rust-patterns": [
+        "intro.html",
+        "idioms/index.html","idioms/coerce-with-target.html","idioms/concat-format.html",
+        "idioms/ctor.html","idioms/default.html","idioms/deref.html","idioms/dtor-finally.html",
+        "idioms/ffi/index.html","idioms/ffi/accepting-strings.html","idioms/ffi/passing-strings.html",
+        "idioms/mem-replace.html","idioms/on-stack-dyn-dispatch.html","idioms/option-iter.html",
+        "idioms/pass-var-to-closure.html","idioms/priv-extend.html",
+        "idioms/return-consumed-arg-on-error.html","idioms/rustdoc-init.html",
+        "idioms/temporary-mutability.html","idioms/unsafe-guidelines.html",
+        "patterns/index.html",
+        "patterns/behavioural/index.html","patterns/behavioural/command.html",
+        "patterns/behavioural/interpreter.html","patterns/behavioural/newtype.html",
+        "patterns/behavioural/RAII.html","patterns/behavioural/strategy.html",
+        "patterns/behavioural/visitor.html","patterns/behavioural/fold.html",
+        "patterns/creational/index.html","patterns/creational/builder.html",
+        "patterns/structural/index.html","patterns/structural/compose-structs.html",
+        "patterns/structural/small-crates.html","patterns/structural/unsafe-mods.html",
+        "anti_patterns/index.html","anti_patterns/borrow_clone.html","anti_patterns/deref.html",
+        "anti_patterns/deny-warnings.html","anti_patterns/wildcard-imports.html",
+        "functional/index.html","functional/generics-type-classes.html",
+        "functional/optics.html","functional/paradigms.html",
+    ],
 }
+
+def _discover_chapters(session: requests.Session, base_url: str) -> list[str]:
+    """
+    Auto-discover chapter URLs from a book's index page.
+    Parses relative href="*.html" links — works for any mdBook-style site.
+    Falls back to ["index.html"] on failure or if nothing is found.
+    """
+    for try_url in [base_url + "index.html", base_url]:
+        try:
+            r = session.get(try_url, timeout=API_TIMEOUT)
+            if r.status_code == 200:
+                break
+        except Exception:
+            pass
+    else:
+        return ["index.html"]
+
+    hrefs = re.findall(r'href="([^"#?]+\.html)"', r.text)
+    seen: set[str] = set()
+    chapters: list[str] = []
+    for h in hrefs:
+        if h.startswith("http") or h.startswith("//") or h.startswith("/"):
+            continue
+        h = h.lstrip("./")          # strip leading "./"
+        if not h or h in seen:
+            continue
+        seen.add(h)
+        chapters.append(h)
+    return chapters if chapters else ["index.html"]
+
 
 def _html_to_text(html: str) -> str:
     """Very light HTML → text: strip tags, decode entities, normalize whitespace."""
@@ -843,8 +1070,9 @@ def scrape_docs(args: argparse.Namespace) -> None:
                 # Chapter-by-chapter
                 chapters = _BOOK_CHAPTERS.get(label, [])
                 if not chapters:
-                    # Fallback: just fetch the index page
-                    chapters = ["index.html"]
+                    console.print(f"[info]  Auto-discovering chapters for {label}...[/info]")
+                    chapters = _discover_chapters(session, base_url)
+                    console.print(f"[info]  Found {len(chapters)} chapters[/info]")
 
                 for chapter in chapters:
                     if _shutdown.is_set():
@@ -879,149 +1107,6 @@ def scrape_docs(args: argparse.Namespace) -> None:
     _print_final_stats(stats, "Docs", manifest)
 
 # ─────────────────────────────────────────────────────────
-#  SOURCE 4: URLO Forum (Discourse API)
-# ─────────────────────────────────────────────────────────
-
-# Categories worth scraping on users.rust-lang.org
-# Format: (category_id, category_slug, label)
-_URLO_CATEGORIES = [
-    (2,  "help",          "help"),
-    (4,  "learn-rust",    "learn-rust"),
-    (10, "tools-and-infrastructure", "tools"),
-    (6,  "announcements", "announcements"),
-]
-
-def fetch_urlo_topic_ids(
-    session: requests.Session, category_id: int, pages: int
-) -> list[int]:
-    """Return topic IDs from a URLO category (newest first)."""
-    ids = []
-    for page in range(pages):
-        if _shutdown.is_set():
-            break
-        url = f"{URLO_API}/c/{category_id}.json?page={page}"
-        try:
-            r = session.get(url, timeout=API_TIMEOUT)
-            r.raise_for_status()
-            data = r.json()
-            topics = data.get("topic_list", {}).get("topics", [])
-            if not topics:
-                break
-            ids.extend(t["id"] for t in topics)
-            time.sleep(FORUM_DELAY)
-        except Exception as e:
-            log.warning(f"URLO category {category_id} page {page}: {e}")
-            time.sleep(FORUM_DELAY * 2)
-    return ids
-
-def fetch_urlo_topic(session: requests.Session, topic_id: int) -> Optional[dict]:
-    """Fetch a full topic (all posts) from URLO."""
-    url = f"{URLO_API}/t/{topic_id}.json"
-    try:
-        r = session.get(url, timeout=API_TIMEOUT)
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        log.warning(f"URLO topic {topic_id}: {e}")
-        return None
-
-def topic_to_conversation(topic_data: dict) -> Optional[str]:
-    """
-    Convert a Discourse topic to a conversation-style text block.
-    Returns None if the topic is too short or low quality.
-    """
-    posts = topic_data.get("post_stream", {}).get("posts", [])
-    if len(posts) < 2:
-        return None
-
-    title = topic_data.get("title", "")
-    lines = [f"# {title}\n"]
-
-    for post in posts:
-        username = post.get("username", "user")
-        raw_html = post.get("cooked", "")         # Discourse serves HTML
-        text = _html_to_text(raw_html).strip()
-        if len(text) < 20:
-            continue
-        lines.append(f"[{username}]\n{text}\n")
-
-    if len(lines) < 3:
-        return None
-
-    full = "\n".join(lines)
-    # Require that Rust is actually discussed
-    if not re.search(r"\b(rust|cargo|fn |impl |struct |trait |enum |borrow|lifetime)\b",
-                     full, re.IGNORECASE):
-        return None
-
-    return full
-
-def scrape_forum(args: argparse.Namespace) -> None:
-    outdir   = args.output_dir
-    session  = make_session()
-    manifest = Manifest(outdir, "forum")
-    stats    = Stats()
-    layout   = _make_layout()
-
-    with Live(layout, console=console, refresh_per_second=4, screen=False):
-
-        def _refresh():
-            layout["header"].update(_header_panel(stats, "URLO Forum"))
-            layout["item"].update(_item_panel(stats))
-
-        _refresh()
-
-        for cat_id, cat_slug, label in _URLO_CATEGORIES:
-            if _shutdown.is_set():
-                break
-            stats.current_item = f"urlo/{label}"
-            stats.current_file = "fetching topic list..."
-            _refresh()
-
-            out_path = output_path(outdir, "forum", label)
-            topic_ids = fetch_urlo_topic_ids(session, cat_id, args.pages)
-            console.print(f"[info]{label}: {len(topic_ids)} topics found[/info]")
-
-            for tid in topic_ids:
-                if _shutdown.is_set():
-                    break
-                tid_str = f"urlo_{tid}"
-                if manifest.is_done(tid_str):
-                    continue
-
-                stats.current_file = f"topic {tid}"
-                _refresh()
-
-                topic_data = fetch_urlo_topic(session, tid)
-                if topic_data is None:
-                    stats.errors += 1
-                    manifest.mark_done(tid_str)
-                    time.sleep(FORUM_DELAY)
-                    continue
-
-                content = topic_to_conversation(topic_data)
-                if content and len(content) >= MIN_FILE_BYTES:
-                    record = make_record(
-                        source="forum", origin=f"urlo/{label}",
-                        path=f"https://users.rust-lang.org/t/{tid}",
-                        content=content,
-                        topic_id=tid,
-                        category=label,
-                    )
-                    write_record(out_path, record)
-                    stats.files_written += 1
-                    stats.bytes_written += len(content.encode("utf-8"))
-                    stats.tokens_est    += record["tokens_est"]
-                else:
-                    stats.files_skipped += 1
-
-                manifest.mark_done(tid_str)
-                time.sleep(FORUM_DELAY)
-                _refresh()
-
-    _print_final_stats(stats, "Forum", manifest)
-
-# ─────────────────────────────────────────────────────────
 #  STATS COMMAND
 # ─────────────────────────────────────────────────────────
 
@@ -1033,7 +1118,7 @@ def stats_cmd(args: argparse.Namespace) -> None:
         console.print(f"[error]Output directory not found: {outdir}[/error]")
         return
 
-    sources = ["crates", "github", "docs", "forum"]
+    sources = ["crates", "github", "docs"]
     totals  = defaultdict(lambda: {"files": 0, "records": 0, "tokens": 0, "mb": 0.0})
 
     for source in sources:
@@ -1082,7 +1167,7 @@ def stats_cmd(args: argparse.Namespace) -> None:
 
     # Manifest counts
     console.print()
-    for source in ["crates", "github", "docs", "forum"]:
+    for source in ["crates", "github", "docs"]:
         m = Manifest(outdir, source)
         console.print(f"  [source]{source:<8}[/source] manifest: {m.count():,} items completed")
 
@@ -1106,7 +1191,7 @@ def _print_final_stats(stats: Stats, source_name: str, manifest: Manifest) -> No
 def main() -> None:
     p = argparse.ArgumentParser(
         prog="rustscrape",
-        description="Rust training data scraper — crates.io · GitHub · Docs · URLO",
+        description="Rust training data scraper — crates.io · GitHub · Docs",
     )
     sub = p.add_subparsers(dest="command")
 
@@ -1125,17 +1210,10 @@ def main() -> None:
     d = sub.add_parser("docs", help="Scrape official Rust documentation")
     d.add_argument("--output-dir", type=str, default="./rust_data")
 
-    # forum
-    f = sub.add_parser("forum", help="Scrape users.rust-lang.org forum threads")
-    f.add_argument("--pages",      type=int, default=200,
-                   help="Pages per category to scrape (default: 200, ~30 topics/page)")
-    f.add_argument("--output-dir", type=str, default="./rust_data")
-
     # all
     a = sub.add_parser("all", help="Run all scrapers in sequence")
     a.add_argument("--token",      type=str, default=None)
     a.add_argument("--top",        type=int, default=500)
-    a.add_argument("--pages",      type=int, default=200)
     a.add_argument("--output-dir", type=str, default="./rust_data")
 
     # stats
@@ -1150,16 +1228,12 @@ def main() -> None:
         scrape_github(args)
     elif args.command == "docs":
         scrape_docs(args)
-    elif args.command == "forum":
-        scrape_forum(args)
     elif args.command == "all":
         scrape_crates(args)
         if not _shutdown.is_set():
             scrape_github(args)
         if not _shutdown.is_set():
             scrape_docs(args)
-        if not _shutdown.is_set():
-            scrape_forum(args)
     elif args.command == "stats":
         stats_cmd(args)
     else:

@@ -789,6 +789,7 @@ def log_cargo_failure(
     cat_name: str,
     attempt: int,
     model: str,
+    raw: str,
     fixed_code: str,
     wrapped_code: str,
     errors: list[str],
@@ -800,6 +801,10 @@ def log_cargo_failure(
         f.write(f"\n{_SEP}\n")
         f.write(f"  {ts}  cat={cat_name!r}  attempt={attempt}  model={model}\n")
         f.write(f"{_SEP}\n")
+        f.write("── raw LLM output ──\n")
+        f.write(raw if raw else "<empty>")
+        if raw and not raw.endswith("\n"):
+            f.write("\n")
         f.write("── fixed_code (as submitted) ──\n")
         f.write(fixed_code)
         if not fixed_code.endswith("\n"):
@@ -998,7 +1003,7 @@ def run(args: argparse.Namespace) -> None:
                 )
                 log_cargo_failure(
                     cat_name, attempt, model,
-                    fixed_code, val["wrapped_code"], val["errors"],
+                    raw, fixed_code, val["wrapped_code"], val["errors"],
                 )
                 total_fail += 1
                 continue

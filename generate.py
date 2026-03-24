@@ -70,11 +70,11 @@ if sys.platform == "win32":
 LM_BASE      = "http://localhost:1234"
 API_V1       = f"{LM_BASE}/api/v1"
 API_OAI      = f"{LM_BASE}/v1"
-TEMPERATURE  = 0.87
+TEMPERATURE  = 0.55
 CPU_THREADS  = 8
-MAX_TOKENS   = 2048
-CTX_LENGTH   = 4096
-REQ_TIMEOUT  = 180
+MAX_TOKENS   = 8192
+CTX_LENGTH   = 8192
+REQ_TIMEOUT  = 360
 LOAD_TIMEOUT = 120
 MAX_RETRIES  = 3
 RETRY_DELAY  = 6
@@ -190,12 +190,12 @@ class DedupStore:
 _PERSONAS = [
     "a complete beginner who has never programmed before",
     "a self-taught hobbyist programmer",
-    "a Python developer learning Rust for the first time",
+    "a developer learning Rust for the first time",
     "a junior developer (6 months experience) at a startup",
-    "a mid-level developer with 3 years of experience in C++",
+    "a mid-level developer with 3 years of systems experience",
     "a senior backend engineer who is new to this specific topic",
     "a computer science student in their second year",
-    "a data scientist who writes mostly Python and R",
+    "a developer coming from a scripting background learning Rust",
     "a DevOps engineer learning to write tooling in Rust",
     "an experienced Java developer exploring systems programming",
     "a bootcamp graduate on their first job",
@@ -425,8 +425,8 @@ class PromptVariator:
             f"Topic: {cat['topic']}\n"
             f"Description: {cat['description']}\n"
             f"Category guidance: {cat['system_hint']}\n\n"
-            f"IMPORTANT: Do NOT include any code blocks, code snippets, or inline code. "
-            f"All explanations must be in plain English only.\n\n"
+            f"IMPORTANT: Do NOT use backticks, code blocks, or any formatted code whatsoever. "
+            f"No backticks anywhere. Plain English only.\n\n"
             f"Output raw JSON only:\n"
             f'{{"category":"{cat["subcategory"]}","topic":"{cat["topic"]}","turns":[...]}}'
         )
@@ -583,8 +583,11 @@ SYS_PROMPT = (
     '- Schema: {"category":"...","topic":"...","turns":['
     '{"role":"user","content":"..."},{"role":"assistant","content":"..."}]}\n'
     "- Turns strictly alternate user/assistant, starting with user.\n"
-    "- NEVER include code blocks, code snippets, inline code, or any formatted code. "
-    "Explain everything in plain English only.\n"
+    "- NEVER include code blocks, inline code, backtick-formatted text, or any formatted code. "
+    "Do not use backticks at all. Explain everything in plain English only.\n"
+    "- This is a Rust conversation. Keep all discussion focused on Rust. Do not explain or "
+    "demonstrate concepts in other languages. References to other languages should only appear "
+    "as brief comparisons, never as the main explanation.\n"
     "- Every conversation must feel genuinely unique.\n"
     "- Raw JSON ONLY. No ```json``` wrappers ever."
 )
@@ -2083,7 +2086,7 @@ def _end_stream_line() -> None:
 #  PARSE FAIL LOGGER
 # ─────────────────────────────────────────────────────────
 
-def _log_parse_fail(output_dir: str, raw: str, cat: dict, attempt: int) -> None:
+def _log_parse_fail(raw: str, cat: dict, attempt: int) -> None:
     """
     Append every failed raw response to parse_failures.log so patterns
     can be reviewed and new repairs added.
@@ -2093,7 +2096,7 @@ def _log_parse_fail(output_dir: str, raw: str, cat: dict, attempt: int) -> None:
     <full raw response>
     ════ END ════
     """
-    log_path = Path(output_dir) / "parse_failures.log"
+    log_path = Path(__file__).parent / "convo_parse_failures.log"
     ts       = time.strftime("%Y-%m-%d %H:%M:%S")
     sep      = "═" * 72
 
@@ -2229,7 +2232,7 @@ def generate(args: argparse.Namespace) -> None:
                     break
 
                 stats.parse_fail += 1
-                _log_parse_fail(outdir, raw, cat, attempt + 1)
+                _log_parse_fail(raw, cat, attempt + 1)
                 first_output[0] = True
                 _think_buf[0]   = ""
 
