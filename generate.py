@@ -403,8 +403,6 @@ class PromptVariator:
         angles   = _CATEGORY_ANGLES.get(cat["id"], _GENERIC_ANGLES)
         angle    = random.choice(angles)
         mods     = random.sample([
-            "Include at least one code snippet.",
-            "Include a realistic error message.",
             "The user makes a wrong assumption early on.",
             "The assistant corrects a misconception gently.",
             "The user asks a follow-up that goes deeper than expected.",
@@ -412,9 +410,9 @@ class PromptVariator:
             "The assistant uses an analogy to explain a concept.",
             "The user pushes back on the first explanation.",
             "The exchange has a slightly informal, friendly tone.",
-            "The user pastes code and asks what's wrong with it.",
             "The assistant asks a clarifying question mid-conversation.",
-            "The user tries something, it doesn't work, and they report back.",
+            "The user is frustrated and the assistant helps them build intuition.",
+            "The assistant explains the why, not just the what.",
         ], k=random.randint(2, 3))
 
         return (
@@ -427,7 +425,8 @@ class PromptVariator:
             f"Topic: {cat['topic']}\n"
             f"Description: {cat['description']}\n"
             f"Category guidance: {cat['system_hint']}\n\n"
-            f"IMPORTANT: Any and all code examples in this conversation must be written in Rust only.\n\n"  # ← ADD THIS
+            f"IMPORTANT: Do NOT include any code blocks, code snippets, or inline code. "
+            f"All explanations must be in plain English only.\n\n"
             f"Output raw JSON only:\n"
             f'{{"category":"{cat["subcategory"]}","topic":"{cat["topic"]}","turns":[...]}}'
         )
@@ -436,13 +435,50 @@ class PromptVariator:
 #  CATEGORY / OUTPUT HELPERS
 # ─────────────────────────────────────────────────────────
 
+def _normalize_category(cat: dict) -> dict:
+    """
+    Adapt a rust_categories.jsonl record to the field names generate.py expects.
+    Detects the new format by the presence of 'prompt_focus'.
+    """
+    if "prompt_focus" not in cat:
+        return cat  # already in old format
+
+    raw_name = cat["category"]  # e.g. "Core - Move Semantics on Function Call"
+    # subcategory = the group prefix before " - ", or the full name if no dash
+    parts = raw_name.split(" - ", 1)
+    subcategory = parts[0].strip() if len(parts) == 2 else raw_name
+
+    # Stable file-safe ID from the full category name
+    slug = re.sub(r"[^a-z0-9]+", "_", raw_name.lower()).strip("_")
+
+    tags = cat.get("tags", [])
+    system_hint = (
+        f"Difficulty: {cat.get('difficulty', 'intermediate')}. "
+        f"Focus: {cat['prompt_focus']}."
+        + (f" Key concepts: {', '.join(tags)}." if tags else "")
+    )
+
+    return {
+        "id":          slug,
+        "category":    "Rust",
+        "subcategory": subcategory,
+        "topic":       raw_name,
+        "description": cat["prompt_focus"],
+        "system_hint": system_hint,
+        "weight":      cat.get("weight", 1),
+        "turns_min":   cat.get("turns_min", 4),
+        "turns_max":   cat.get("turns_max", 12),
+        "style":       "technical",
+    }
+
+
 def load_categories(path: str) -> list:
     cats = []
     with open(path, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
-                cats.append(json.loads(line))
+                cats.append(_normalize_category(json.loads(line)))
     if not cats:
         console.print("[error]No categories found.[/error]")
         sys.exit(1)
@@ -547,10 +583,8 @@ SYS_PROMPT = (
     '- Schema: {"category":"...","topic":"...","turns":['
     '{"role":"user","content":"..."},{"role":"assistant","content":"..."}]}\n'
     "- Turns strictly alternate user/assistant, starting with user.\n"
-    "- For technical topics: use real code and realistic error messages.\n"
-    "- ALL code examples MUST be written in Rust only. Never use any other language.\n"
-    "- ANY MENTION OF CODE SNIPPETS MUST BE FOLLOWED BY CODE SNIPPETS!\n"
-    "- For casual topics: use natural informal language.\n"
+    "- NEVER include code blocks, code snippets, inline code, or any formatted code. "
+    "Explain everything in plain English only.\n"
     "- Every conversation must feel genuinely unique.\n"
     "- Raw JSON ONLY. No ```json``` wrappers ever."
 )
@@ -826,6 +860,14 @@ def _preprocess_schema_and_quotes(text: str) -> str:
     #    The } right after the closing " is a stray inline turn-close; the
     #    authoritative close is the },  on the next line.  Strip the inline }.
     t = re.sub(r'"}\n(\s+},)', lambda m: '"\n' + m.group(1), text)
+
+    # 0b. Stray code-fence line after content string close.
+    #     The model placed the closing ``` on its own line after the string-close ":
+    #       "content": "...code"
+    #       ```",
+    #     The ``` belongs inside the string (as the code block close).  Strip the
+    #     stray line and keep the comma separator so the field sequence stays valid.
+    t = re.sub(r'"\n\s*```",?', '",', t)
 
     # 1a. Stray backslash-newline before a JSON key → close string + comma
     #     Handles fused turns where model ended content with \ before next turn's key.
@@ -1110,6 +1152,93 @@ def _repair_fence_escaped_quote(text: str) -> Optional[dict]:
     if fixed != text:
         return _try_parse(fixed)
     return None
+
+
+def _repair_double_backslash_before_quote(text: str) -> Optional[dict]:
+    """
+    Fix: \\\\\" (two backslashes + quote) interpreted by the JSON parser as
+    \\\\ (escaped backslash) + \" (string close), causing premature end-of-string.
+
+    The model intended \\\\ (literal backslash) + \\" (escaped inner quote), but
+    wrote one too many backslashes.  Collapsing the pair to a single backslash
+    turns \\\\" into \\" which is the correct escaped-quote form.
+
+    Pattern: two backslashes not preceded by another backslash, followed by "
+             → single backslash followed by " (i.e. an escaped inner quote)
+    """
+    fixed = re.sub(r'(?<!\\)\\\\(?=")', r'\\', text)
+    if fixed != text:
+        return _try_parse(fixed)
+    return None
+
+
+def _repair_content_section_quotes(text: str) -> Optional[dict]:
+    """
+    Fix content strings where the model used bare " to terminate markdown
+    sections AND/OR embedded literal newlines.
+
+    Some models write responses as markdown sections, each terminated with a
+    bare " (as if closing a sub-string), followed by a blank line and the
+    next section.  Combined with literal newlines (actual \\n chars) inside
+    the string value, the standard repair chain fails.
+
+    This scanner:
+      • Finds each "content": " or "role": " opener.
+      • Scans the string value, treating a " followed immediately by a
+        structural delimiter (,  }  ]) as the real close.
+      • Any other " is treated as a spurious section-terminator and escaped.
+      • Literal newlines (\\n / \\r) inside the string are also escaped.
+    """
+    result:  list = []
+    i        = 0
+    n        = len(text)
+    changed  = False
+    OPENER   = re.compile(r'"(?:content|role)"\s*:\s*"')
+    IS_DELIM = re.compile(r'\s*[,}\]]')
+
+    while i < n:
+        m = OPENER.match(text, i)
+        if m:
+            result.append(text[i:m.end()])
+            i = m.end()
+            # Scan the string value with special quote / newline handling
+            while i < n:
+                ch = text[i]
+                if ch == '\\':
+                    result.append(ch)
+                    i += 1
+                    if i < n:
+                        result.append(text[i])
+                        i += 1
+                    continue
+                elif ch == '"':
+                    if IS_DELIM.match(text, i + 1):
+                        result.append(ch)   # real close
+                        i += 1
+                        break
+                    else:
+                        result.append('\\"')   # spurious section close
+                        i += 1
+                        changed = True
+                elif ch == '\n':
+                    result.append('\\n')
+                    i += 1
+                    changed = True
+                elif ch == '\r':
+                    result.append('\\r')
+                    i += 1
+                    changed = True
+                else:
+                    result.append(ch)
+                    i += 1
+        else:
+            result.append(text[i])
+            i += 1
+
+    if not changed:
+        return None
+    fixed = ''.join(result)
+    return _try_parse(fixed) or _repair_truncated(fixed)
 
 
 def _repair_literal_newlines(text: str) -> Optional[dict]:
@@ -1651,9 +1780,11 @@ def repair_and_parse(raw: str) -> Optional[dict]:
       4.  Trailing comma removal       (JS habit: [...,] or {...,})
       5.  Single-quote coercion        (Python dict style)
       6.  Literal newlines in strings  (bare \\n inside JSON string values)
-      6.  Mixed escaping fix           (partial \\" sequences)
-      7.  Closing fence escaped quote  (```\\" → ```")
-      8.  Invalid escape sequences     (\\ before non-special chars)
+      6b. Content section quotes + newlines (spurious " section terminators + bare \\n)
+      7.  Mixed escaping fix           (partial \\" sequences)
+      8.  Closing fence escaped quote  (```\\" → ```")
+      8b. Double backslash before quote  (\\\\" → \\" — premature string close)
+      9.  Invalid escape sequences     (\\ before non-special chars)
       9.  Truncation repair            (hit max_tokens mid-output)
       9b. Truncation + nested turns    (truncated AND duplicate-content-key/embedded-turns)
       10. Missing turn-close brace     (with or without preceding comma)
@@ -1699,12 +1830,20 @@ def repair_and_parse(raw: str) -> Optional[dict]:
         if data: log.debug("repair: literal newlines in strings")
 
     if data is None:
+        data = _repair_content_section_quotes(text)
+        if data: log.debug("repair: content section quotes + literal newlines")
+
+    if data is None:
         data = _repair_mixed_escaping(text)
         if data: log.debug("repair: mixed escaping")
 
     if data is None:
         data = _repair_fence_escaped_quote(text)
         if data: log.debug("repair: fence escaped quote")
+
+    if data is None:
+        data = _repair_double_backslash_before_quote(text)
+        if data: log.debug("repair: double backslash before quote")
 
     if data is None:
         data = _repair_invalid_escape_sequences(text)
@@ -2235,19 +2374,19 @@ def main() -> None:
     g.add_argument("--count",              type=int,   default=10_000)
     g.add_argument("--rotate-every",       type=int,   default=150)
     g.add_argument("--output-dir",         type=str,   default="./output")
-    g.add_argument("--categories",         type=str,   default="categories.jsonl")
+    g.add_argument("--categories",         type=str,   default="rust_categories.jsonl")
     g.add_argument("--delay",              type=float, default=0.0)
     g.add_argument("--no-unload-existing", action="store_true")
 
     s = sub.add_parser("stats", help="Print dataset statistics")
     s.add_argument("--output-dir",  default="./output")
-    s.add_argument("--categories",  default="categories.jsonl")
+    s.add_argument("--categories",  default="rust_categories.jsonl")
     s.add_argument("--verbose",     action="store_true")
     s.add_argument("--show-empty",  action="store_true")
 
     sp = sub.add_parser("sample", help="Print random sample conversations")
     sp.add_argument("--output-dir",  default="./output")
-    sp.add_argument("--categories",  default="categories.jsonl")
+    sp.add_argument("--categories",  default="rust_categories.jsonl")
     sp.add_argument("--category",    default=None)
     sp.add_argument("--n",           type=int, default=2)
 
