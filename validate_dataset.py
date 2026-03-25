@@ -86,7 +86,7 @@ CRATE_MAP: dict[str, str] = {
     # Serialization
     "serde":              'serde = { version = "1", features = ["derive"] }',
     "serde_json":         'serde_json = "1"',
-    "json_canon":         'json_canon = "0.1"',
+    "json_canon":         'json-canon = "0.1"',
     "serde_derive":       'serde_derive = "1"',
     "toml":               'toml = "0.8"',
     "csv":                'csv = "1"',
@@ -177,7 +177,7 @@ CRATE_MAP: dict[str, str] = {
     "proptest":           'proptest = "1"',
     "quickcheck":         'quickcheck = "1"',
     "mockall":            'mockall = "0.12"',
-    "static_assertions":  'static-assertions = "1"',
+    "static_assertions":  'static_assertions = "1"',
     "insta":              'insta = "1"',
     "assert2":            'assert2 = "0.3"',
     # Hashing / crypto
@@ -528,8 +528,32 @@ def make_cargo_toml(crates: list[str], edition: str = EDITION) -> str:
 #  CODE WRAPPING
 # ─────────────────────────────────────────────────────────
 
+_PROSE_LINE = re.compile(
+    r"^[A-Z`'\u2018\u2019\u201c\u201d][^\n]{20,}$"
+)
+
+def _strip_leading_prose(code: str) -> str:
+    """
+    Remove leading natural-language lines that were accidentally prepended
+    to fixed_code in some source records (e.g. 'The original implementation...').
+    Stops as soon as a line looks like Rust code.
+    """
+    lines = code.splitlines()
+    start = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _PROSE_LINE.match(stripped):
+            start = i + 1
+        else:
+            break
+    return "\n".join(lines[start:])
+
+
 def _preprocess(code: str) -> str:
-    """Strip Python-style comments and convert `mod foo;` to inline modules."""
+    """Strip Python-style comments, prose prefixes, and convert `mod foo;` to inline modules."""
+    code = _strip_leading_prose(code)
     code = _PYTHON_COMMENT.sub("", code)
     code = _MOD_FILE_DECL.sub(r"\1 {}", code)
     return code
