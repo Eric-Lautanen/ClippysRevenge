@@ -1,0 +1,8 @@
+{
+  "blowfish": "blowfish",
+  "datafusion_datasource": "datafusion_datasource",
+  "io": "io",
+  "mnist": "mnist",
+  "tracing_indicatif": "tracing_indicatif",
+  "triomphe": "triomphe"
+}
