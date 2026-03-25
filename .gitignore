@@ -2,6 +2,8 @@
 rust_forge/
 datasets/
 rust_data/
+validated/
+cargo_target/
 
 # Dedup fingerprint cache
 .hashes/
