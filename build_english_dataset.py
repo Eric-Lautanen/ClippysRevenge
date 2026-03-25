@@ -90,6 +90,16 @@ from pathlib import Path
 from typing import Optional
 
 # =============================================================================
+# USER CONFIGURATION
+# Set your HuggingFace token here to access gated datasets
+# (lmsys/lmsys-chat-1m, lmsys/chatbot_arena_conversations, etc.)
+# Get your token at: https://huggingface.co/settings/tokens
+# You can also pass it via --hf_token on the command line, or set the
+# HF_TOKEN environment variable.
+# =============================================================================
+HF_TOKEN = ""   # <-- paste your HF token here, e.g. "hf_xxxxxxxxxxxxxxxxxxxx"
+
+# =============================================================================
 # DEPENDENCY CHECKS  (fail fast with clear messages)
 # =============================================================================
 try:
@@ -110,6 +120,24 @@ try:
     from tqdm import tqdm
 except ImportError:
     sys.exit("ERROR: 'tqdm' not installed.  Run:  pip install tqdm")
+
+# Check for the dill/multiprocess version bug that breaks load_dataset on Python 3.13+.
+# Symptom: "Pickler._batch_setitems() takes 2 positional arguments but 3 were given"
+# Fix:     pip install --upgrade dill multiprocess
+import sys as _sys
+if _sys.version_info >= (3, 13):
+    try:
+        import dill as _dill
+        from packaging.version import Version as _V
+        if _V(_dill.__version__) < _V("0.3.9"):
+            print(
+                "WARNING: Python 3.13+ detected with dill < 0.3.9. "
+                "You will likely get 'Pickler._batch_setitems()' errors.\n"
+                "Fix:  pip install --upgrade dill multiprocess\n",
+                file=sys.stderr,
+            )
+    except ImportError:
+        pass  # packaging not available — skip the check silently
 
 
 # =============================================================================
@@ -146,8 +174,10 @@ REGISTRY: dict[str, tuple] = {
         "Real user x LLM chats (1M). Broad intent diversity.",
     ),
     "wildchat": (
-        "allenai/WildChat-1M", None, "train",
-        "Real ChatGPT logs (1M). Edge-cases, diverse topics.",
+        # Upgraded: WildChat-1M -> WildChat-4.8M (free/ungated, 3.2M non-toxic
+        # convos through Aug 2025, includes o1-preview/o1-mini reasoning turns)
+        "allenai/WildChat-4.8M", None, "train",
+        "Real ChatGPT/o1 logs (3.2M non-toxic). Upgraded from 1M to 4.8M.",
     ),
     "openorca": (
         "Open-Orca/OpenOrca", None, "train",
@@ -166,7 +196,9 @@ REGISTRY: dict[str, tuple] = {
         "Human-written categorical intents (15k).",
     ),
     "hh_rlhf": (
-        "Anthropic/hh-rlhf", "helpful-base", "train",
+        # NOTE: hh-rlhf uses data_dir= (not a named config). "helpful-base"
+        # is passed via load_kwargs below, not as the config positional arg.
+        "Anthropic/hh-rlhf", None, "train",
         "Helpful/harmless preference pairs (170k).",
     ),
     # 2024-2025
@@ -187,12 +219,24 @@ REGISTRY: dict[str, tuple] = {
         "Basic everyday conversations (2k). Critical for SLM greetings.",
     ),
     "orca_agentinstruct": (
-        "microsoft/orca-agentinstruct-1M-v1", None, "train",
+        # NOTE: this dataset has NO "train" split — it uses named splits like
+        # "creative_content", "rc", "rag", "mcq", "follow_up", "code_", etc.
+        # process_dataset detects the sentinel "_ALL_SPLITS_" and iterates them.
+        "microsoft/orca-agentinstruct-1M-v1", None, "_ALL_SPLITS_",
         "AgentInstruct 1M (Microsoft). Diverse web-grounded tasks.",
     ),
     "chatbot_arena": (
         "lmsys/chatbot_arena_conversations", None, "train",
         "Chatbot Arena conversations with GPT-4/Claude/etc (33k).",
+    ),
+    # ── New 2024-2025 additions ────────────────────────────────────────────
+    "openhermes": (
+        "teknium/OpenHermes-2.5", None, "train",
+        "1M GPT-4 generated instruction/chat samples. Widely used SFT mix.",
+    ),
+    "magpie_llama33": (
+        "Magpie-Align/Magpie-Llama-3.3-Pro-1M-v0.1", None, "train",
+        "Magpie pipeline on Llama-3.3-70B (1M). Newer & higher quality synth.",
     ),
 }
 
@@ -450,6 +494,32 @@ def parse_chatbot_arena(row: dict) -> Optional[dict]:
     return _norm_messages(conv, "chatbot_arena") if conv else None
 
 
+
+
+def parse_openhermes(row: dict) -> Optional[dict]:
+    # OpenHermes-2.5 uses ShareGPT-style "conversations" with from/value keys
+    conv = row.get("conversations")
+    if not conv or not isinstance(conv, list):
+        return None
+    turns: list[dict] = []
+    role_map = {"human": "user", "gpt": "assistant", "system": "system"}
+    for m in conv:
+        if not isinstance(m, dict):
+            continue
+        role    = role_map.get(str(m.get("from") or "").lower(), None)
+        content = clean_text(str(m.get("value") or ""))
+        if not role or not content:
+            continue
+        turns.append({"role": role, "content": content})
+    return _make_conv(turns, "openhermes") if turns else None
+
+
+def parse_magpie_llama33(row: dict) -> Optional[dict]:
+    # Same structure as magpie_pro: instruction/response or conversations field
+    return parse_magpie_pro(row) and _make_conv(
+        parse_magpie_pro(row)["conversations"], "magpie_llama33"
+    ) if parse_magpie_pro(row) else None
+
 PARSERS: dict = {
     "lmsys_chat":         parse_lmsys_chat,
     "wildchat":           parse_wildchat,
@@ -463,6 +533,8 @@ PARSERS: dict = {
     "everyday_convos":    parse_everyday_convos,
     "orca_agentinstruct": parse_orca_agentinstruct,
     "chatbot_arena":      parse_chatbot_arena,
+    "openhermes":         parse_openhermes,
+    "magpie_llama33":     parse_magpie_llama33,
 }
 
 
@@ -613,6 +685,7 @@ def process_dataset(
     args: argparse.Namespace,
     seen_hashes: set,
     writer: ChunkedWriter,
+    hf_token: str | None = None,
 ) -> tuple[int, int, int, int]:
     """
     Load, parse, filter, dedup, write one dataset.
@@ -626,7 +699,10 @@ def process_dataset(
     # ── OASST2: special tree-walk, no streaming ───────────────────────────
     if key == "oasst2":
         try:
-            ds_full = load_dataset(path, split=split, trust_remote_code=False)
+            ds_full = load_dataset(
+                path, split=split, trust_remote_code=False,
+                **({"token": hf_token} if hf_token else {}),
+            )
         except Exception as e:
             log.warning(f"   SKIP -- could not load oasst2: {e}")
             return 0, 0, 0, 0
@@ -657,14 +733,45 @@ def process_dataset(
         return total, kept, written, errors
 
     # ── All other datasets: streaming row-by-row ──────────────────────────
-    try:
-        load_kwargs: dict = dict(split=split, streaming=True, trust_remote_code=False)
-        if config:
-            load_kwargs["name"] = config
-        ds = load_dataset(path, **load_kwargs)
-    except Exception as e:
-        log.warning(f"   SKIP -- could not load: {e}")
-        return 0, 0, 0, 0
+
+    # orca_agentinstruct has no "train" split — it uses many named splits.
+    # We detect the sentinel and concatenate all available splits.
+    if split == "_ALL_SPLITS_":
+        try:
+            from datasets import get_dataset_split_names, concatenate_datasets
+            split_names = get_dataset_split_names(path)
+            log.info(f"   Loading {len(split_names)} splits: {', '.join(split_names)}")
+            base_kwargs: dict = dict(streaming=True, trust_remote_code=False)
+            if hf_token:
+                base_kwargs["token"] = hf_token
+            split_datasets = []
+            for sn in split_names:
+                try:
+                    split_datasets.append(load_dataset(path, split=sn, **base_kwargs))
+                except Exception as e:
+                    log.warning(f"   Could not load split '{sn}': {e}")
+            if not split_datasets:
+                log.warning(f"   SKIP -- no splits could be loaded for '{key}'")
+                return 0, 0, 0, 0
+            from datasets import interleave_datasets
+            ds = interleave_datasets(split_datasets)
+        except Exception as e:
+            log.warning(f"   SKIP -- could not load multi-split dataset: {e}")
+            return 0, 0, 0, 0
+    else:
+        try:
+            load_kwargs: dict = dict(split=split, streaming=True, trust_remote_code=False)
+            if config:
+                load_kwargs["name"] = config
+            # hh-rlhf uses data_dir= to select the subset, not a named config
+            if key == "hh_rlhf":
+                load_kwargs["data_dir"] = "helpful-base"
+            if hf_token:
+                load_kwargs["token"] = hf_token
+            ds = load_dataset(path, **load_kwargs)
+        except Exception as e:
+            log.warning(f"   SKIP -- could not load: {e}")
+            return 0, 0, 0, 0
 
     parser = PARSERS.get(key)
     if parser is None:
@@ -790,7 +897,7 @@ def main():
     log.info(f"Log file: {out_dir / 'build.log'}")
 
     # ── HuggingFace auth ──────────────────────────────────────────────────
-    hf_token = args.hf_token or os.environ.get("HF_TOKEN")
+    hf_token = args.hf_token or HF_TOKEN or os.environ.get("HF_TOKEN") or None
     if hf_token:
         try:
             from huggingface_hub import login
@@ -885,7 +992,7 @@ def main():
 
             try:
                 total, kept, written, errors = process_dataset(
-                    key, args, seen_hashes, writer
+                    key, args, seen_hashes, writer, hf_token=hf_token
                 )
             except KeyboardInterrupt:
                 # Secondary catch for platforms where signal handler may not fire
