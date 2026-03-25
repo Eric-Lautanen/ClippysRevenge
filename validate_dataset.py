@@ -169,7 +169,7 @@ CRATE_MAP: dict[str, str] = {
     "dotenv":             'dotenv = "0.15"',
     # Database
     "rusqlite":           'rusqlite = { version = "0.31", features = ["bundled"] }',
-    "sqlx":               'sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio"] }',
+    "sqlx":               'sqlx = { version = "0.7", features = ["runtime-tokio-native-tls"] }',
     # Graphics / GUI (compile-check only, heavy but valid)
     "image":              'image = "0.25"',
     "nalgebra":           'nalgebra = "0.32"',
@@ -258,7 +258,7 @@ CRATE_MAP: dict[str, str] = {
     "getset":             'getset = "0.1"',
     "delegate":           'delegate = "0.12"',
     "ambassador":         'ambassador = "0.4"',
-    "newtype_derive":     'newtype-derive = "0.1"',
+    "newtype_derive":     'newtype_derive = "0.1"',
     "shrinkwraprs":       'shrinkwraprs = "0.3"',
     "nutype":             'nutype = { version = "0.5", features = ["serde"] }',
     "smart_default":      'smart-default = "0.7"',
@@ -268,7 +268,7 @@ CRATE_MAP: dict[str, str] = {
     "deriving_via":       'deriving_via = "2"',
     "typesize":           'typesize = "0.1"',
     # String / text extras
-    "smol_str":           'smol-str = "0.2"',
+    "smol_str":           'smol_str = "0.2"',
     "compact_str":        'compact_str = "0.8"',
     "aho_corasick":       'aho-corasick = "1"',
     "fancy_regex":        'fancy-regex = "0.13"',
@@ -326,7 +326,7 @@ CRATE_MAP: dict[str, str] = {
     "color_eyre":         'color-eyre = "0.6"',
     "eyre":               'eyre = "0.6"',
     # State machine / actor
-    "tokio_actor":        'tokio-actor = "0.2"',
+    "tokio_actor":        'tokio-actor = "0.1"',
     "actix":              'actix = "0.13"',
     # DB extras
     "redis":              'redis = "0.26"',
@@ -341,7 +341,7 @@ CRATE_MAP: dict[str, str] = {
     "tap":                'tap = "1"',
     "scopeguard":         'scopeguard = "1"',
     "fragile":            'fragile = "2"',
-    "owning_ref":         'owning-ref = "0.4"',
+    "owning_ref":         'owning_ref = "0.4"',
     "tinyvec":            'tinyvec = { version = "1", features = ["alloc"] }',
     "arrayvec":           'arrayvec = "0.7"',
     "thin_vec":           'thin-vec = "0.2"',
@@ -716,14 +716,31 @@ def _ensure_base_project() -> None:
                 timeout=CARGO_ADD_TIMEOUT,
             )
 
-    print("  Refreshing base project (cargo fetch)…", flush=True)
-    subprocess.run(
+    print("  Fetching base project dependencies…", flush=True)
+    r = subprocess.run(
         ["cargo", "fetch"],
         cwd=str(BASE_PROJECT_DIR),
         env=cargo_env,
         capture_output=True,
         timeout=300,
     )
+    if r.returncode != 0:
+        print(f"[ERROR] cargo fetch failed on base project:\n{r.stderr}", file=sys.stderr)
+        sys.exit(1)
+
+    # Pre-warm: compile all deps once so workers reuse artifacts immediately.
+    # Without this, all workers queue behind cargo's file lock on the first run.
+    print("  Pre-warming cargo_target (this may take a while on first run)…", flush=True)
+    r = subprocess.run(
+        ["cargo", "check", "--quiet"],
+        cwd=str(BASE_PROJECT_DIR),
+        env=cargo_env,
+        capture_output=True,
+        timeout=600,
+    )
+    if r.returncode != 0:
+        print(f"[ERROR] cargo check failed on base project:\n{r.stderr}", file=sys.stderr)
+        sys.exit(1)
     print("  Base project ready.", flush=True)
 
 
