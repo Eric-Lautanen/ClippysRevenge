@@ -1,5 +1,4 @@
 # Generated data — can be gigabytes, never commit
-rust_forge/
 datasets/
 rust_data/
 validated/
