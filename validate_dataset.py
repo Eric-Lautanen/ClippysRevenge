@@ -27,6 +27,7 @@ import os
 import re
 import subprocess
 import sys
+import shutil
 import tempfile
 import time
 import threading
@@ -46,6 +47,7 @@ CARGO_ADD_TIMEOUT = 120                 # seconds for `cargo add` (network)
 MAX_ADD_ROUNDS    = 8                   # max rounds of "add missing crate → retry"
 CRATE_CACHE_FILE  = Path("crate_add_cache.json")  # persists across runs
 SHARED_TARGET_DIR = Path(__file__).parent / "cargo_target"  # shared build cache
+BASE_PROJECT_DIR  = Path(__file__).parent / "base_project"  # persistent base Cargo project
 
 # Target output schema — all records are normalised to this shape (null = unknown)
 _SCHEMA_DEFAULTS: dict = {
@@ -659,6 +661,101 @@ def _run(cmd: list[str], cwd: Path, timeout: int = CARGO_TIMEOUT, env: dict | No
     )
 
 
+def _make_base_cargo_toml() -> str:
+    """Cargo.toml for the persistent base project — all CRATE_MAP entries only.
+    Dynamically discovered crates are added afterwards via `cargo add --all-features`
+    so cargo manages their versions and features correctly."""
+    lines = [
+        '[package]',
+        'name = "rust-base"',
+        'version = "0.1.0"',
+        f'edition = "{EDITION}"',
+        '',
+        '[dependencies]',
+    ]
+    for dep in sorted(set(CRATE_MAP.values())):
+        lines.append(dep)
+    return "\n".join(lines) + "\n"
+
+
+def _ensure_base_project() -> None:
+    """
+    Create or refresh the base Cargo project.
+
+    The base project holds every CRATE_MAP dependency plus anything discovered
+    dynamically in previous runs.  Its Cargo.toml / Cargo.lock are copied into
+    each snippet's temp directory so cargo can reuse compiled artifacts from
+    SHARED_TARGET_DIR without re-resolving deps from scratch each time.
+    """
+    BASE_PROJECT_DIR.mkdir(parents=True, exist_ok=True)
+    src_dir = BASE_PROJECT_DIR / "src"
+    src_dir.mkdir(exist_ok=True)
+    lib_rs = src_dir / "lib.rs"
+    if not lib_rs.exists():
+        lib_rs.write_text("// base project — do not edit manually\n", encoding="utf-8")
+
+    cargo_toml = BASE_PROJECT_DIR / "Cargo.toml"
+    cargo_env = {**os.environ, "CARGO_TARGET_DIR": str(SHARED_TARGET_DIR)}
+
+    # Write CRATE_MAP deps if Cargo.toml doesn't exist yet
+    if not cargo_toml.exists():
+        cargo_toml.write_text(_make_base_cargo_toml(), encoding="utf-8")
+
+    # Add any previously discovered crates (from cache) that aren't already present
+    current = cargo_toml.read_text(encoding="utf-8")
+    new_pkgs = [v for v in _crate_cache.values()
+                if v is not None and v not in current]
+    if new_pkgs:
+        print(f"  Adding {len(new_pkgs)} cached crate(s) to base project…", flush=True)
+        for pkg in sorted(new_pkgs):
+            subprocess.run(
+                ["cargo", "add", pkg, "--all-features"],
+                cwd=str(BASE_PROJECT_DIR),
+                env=cargo_env,
+                capture_output=True,
+                timeout=CARGO_ADD_TIMEOUT,
+            )
+
+    print("  Refreshing base project (cargo fetch)…", flush=True)
+    subprocess.run(
+        ["cargo", "fetch"],
+        cwd=str(BASE_PROJECT_DIR),
+        env=cargo_env,
+        capture_output=True,
+        timeout=300,
+    )
+    print("  Base project ready.", flush=True)
+
+
+def _update_base_project() -> None:
+    """
+    Add any crates discovered dynamically during this run to the base project
+    via `cargo add --all-features` so they are pre-compiled for the next run.
+    """
+    cargo_env = {**os.environ, "CARGO_TARGET_DIR": str(SHARED_TARGET_DIR)}
+    current = (BASE_PROJECT_DIR / "Cargo.toml").read_text(encoding="utf-8")
+    new_pkgs = [v for v in _crate_cache.values()
+                if v is not None and v not in current]
+    if not new_pkgs:
+        return
+    print(f"\n  Persisting {len(new_pkgs)} new crate(s) to base project…", flush=True)
+    for pkg in sorted(new_pkgs):
+        subprocess.run(
+            ["cargo", "add", pkg, "--all-features"],
+            cwd=str(BASE_PROJECT_DIR),
+            env=cargo_env,
+            capture_output=True,
+            timeout=CARGO_ADD_TIMEOUT,
+        )
+    subprocess.run(
+        ["cargo", "fetch"],
+        cwd=str(BASE_PROJECT_DIR),
+        env=cargo_env,
+        capture_output=True,
+        timeout=300,
+    )
+
+
 def _cargo_validate(wrapped: str, crates: list[str], edition: str, run_clippy: bool = True) -> dict:
     """
     Spin up a temp Cargo project, compile `wrapped`, return a result dict.
@@ -682,7 +779,12 @@ def _cargo_validate(wrapped: str, crates: list[str], edition: str, run_clippy: b
     with tempfile.TemporaryDirectory(prefix="rustval_") as tmp:
         proj = Path(tmp) / "rust-example"
         proj.mkdir()
-        (proj / "Cargo.toml").write_text(make_cargo_toml(crates, edition), encoding="utf-8")
+        # Copy base project's Cargo.toml + Cargo.lock so deps are already resolved
+        # and compiled artifacts in SHARED_TARGET_DIR can be reused immediately.
+        shutil.copy2(BASE_PROJECT_DIR / "Cargo.toml", proj / "Cargo.toml")
+        base_lock = BASE_PROJECT_DIR / "Cargo.lock"
+        if base_lock.exists():
+            shutil.copy2(base_lock, proj / "Cargo.lock")
         src = proj / "src"
         src.mkdir()
         (src / "main.rs").write_text(wrapped, encoding="utf-8")
@@ -1009,6 +1111,9 @@ def run(args: argparse.Namespace) -> None:
     # Monkey-patch save to use the output dir
     CRATE_CACHE_FILE = cache_path
 
+    # Build/refresh the base project (uses crate cache, so must come after load)
+    _ensure_base_project()
+
     log_path     = output_dir / "validation_failures.log"
     writer       = RotatingWriter(output_dir, prefix="validated", max_bytes=MAX_FILE_BYTES)
     failures_dir = output_dir / "failures"
@@ -1079,6 +1184,10 @@ def run(args: argparse.Namespace) -> None:
 
     writer.close()
     fail_writer.close()
+
+    # Persist any newly discovered crates into the base project for the next run
+    _update_base_project()
+
     elapsed = time.time() - t0
 
     print(f"\n\n{'─' * 60}")
