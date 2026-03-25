@@ -4,6 +4,7 @@ datasets/
 rust_data/
 validated/
 cargo_target/
+base_project/
 
 # Dedup fingerprint cache
 .hashes/
