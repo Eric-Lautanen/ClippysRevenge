@@ -13,6 +13,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.json
 .Python
 *.egg-info/
 dist/
