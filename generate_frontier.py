@@ -711,7 +711,8 @@ def validate(fixed_code: str, declared_crates: list[str]) -> dict:
     """
     result = {
         "build": False, "clippy": False, "fmt": False, "msrv": False,
-        "clippy_lints": [], "min_rust_version": "1.56.0",
+        "clippy_lints": [], "clippy_output": "",
+        "min_rust_version": "1.56.0",
         "compiler_ver": "", "has_unsafe": False,
         "wrapped_code": fixed_code, "errors": [],
     }
@@ -765,7 +766,8 @@ def validate(fixed_code: str, declared_crates: list[str]) -> dict:
                 m = re.search(r"\[([a-z_:]+)\]", line)
                 if m and m.group(1) not in ("E", "W"):
                     lints.append(m.group(1))
-            result["clippy_lints"] = sorted(set(lints))
+            result["clippy_lints"]  = sorted(set(lints))
+            result["clippy_output"] = r.stderr.strip()
 
         # ── MSRV: pattern-based detection (edition 2021 baseline = 1.56) ──
         result["min_rust_version"] = _detect_msrv(wrapped)
@@ -1023,11 +1025,12 @@ def run(args: argparse.Namespace) -> None:
                 "edition":          EDITION,
                 "source_model":     model,
                 "validation": {
-                    "fmt":          val["fmt"],
-                    "clippy":       val["clippy"],
-                    "build":        val["build"],
-                    "test":         False,  # not run by default
-                    "clippy_lints": val["clippy_lints"],
+                    "fmt":           val["fmt"],
+                    "clippy":        val["clippy"],
+                    "build":         val["build"],
+                    "test":          False,  # not run by default
+                    "clippy_lints":  val["clippy_lints"],
+                    "clippy_output": val["clippy_output"],
                 },
                 "verified_at":       str(int(time.time())),
                 "compiler_ver":      val["compiler_ver"],
