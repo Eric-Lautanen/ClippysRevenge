@@ -86,6 +86,7 @@ CTX_LENGTH   = 8192
 LOAD_TIMEOUT = 120
 EDITION      = "2021"
 LICENSE      = "Apache-2.0"
+SHARED_TARGET_DIR = Path(__file__).parent / "cargo_target"  # shared build cache
 
 # ─────────────────────────────────────────────────────────
 #  CRATE → Cargo.toml DEPENDENCY MAP
@@ -650,13 +651,14 @@ def wrap_for_check(code: str) -> str:
 #  CARGO VALIDATION
 # ─────────────────────────────────────────────────────────
 
-def _run(cmd: list[str], cwd: Path, timeout: int = 120) -> subprocess.CompletedProcess:
+def _run(cmd: list[str], cwd: Path, timeout: int = 120, env: dict | None = None) -> subprocess.CompletedProcess:
     return subprocess.run(
         cmd,
         cwd=str(cwd),
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=env,
     )
 
 
@@ -732,6 +734,9 @@ def validate(fixed_code: str, declared_crates: list[str]) -> dict:
     result["wrapped_code"]  = wrapped
     result["has_unsafe"]    = bool(re.search(r"\bunsafe\b", wrapped))
 
+    SHARED_TARGET_DIR.mkdir(parents=True, exist_ok=True)
+    cargo_env = {**os.environ, "CARGO_TARGET_DIR": str(SHARED_TARGET_DIR)}
+
     with tempfile.TemporaryDirectory(prefix="frontier_") as tmp:
         proj = Path(tmp) / "rust-example"
         proj.mkdir()
@@ -741,14 +746,14 @@ def validate(fixed_code: str, declared_crates: list[str]) -> dict:
         (src / "main.rs").write_text(wrapped, encoding="utf-8")
 
         # ── cargo check ──────────────────────────────────────────────
-        r = _run(["cargo", "check", "--quiet", "--color=never"], proj)
+        r = _run(["cargo", "check", "--quiet", "--color=never"], proj, env=cargo_env)
         if r.returncode != 0:
             result["errors"] = [r.stderr.strip()]
             return result  # no point continuing
         result["build"] = True
 
         # ── cargo fmt --check ────────────────────────────────────────
-        r = _run(["cargo", "fmt", "--", "--check"], proj)
+        r = _run(["cargo", "fmt", "--", "--check"], proj, env=cargo_env)
         result["fmt"] = (r.returncode == 0)
 
         # ── cargo clippy ─────────────────────────────────────────────
@@ -756,6 +761,7 @@ def validate(fixed_code: str, declared_crates: list[str]) -> dict:
             ["cargo", "clippy", "--quiet", "--color=never",
              "--", "-D", "warnings"],
             proj,
+            env=cargo_env,
         )
         result["clippy"] = (r.returncode == 0)
         # Collect all lint names from clippy/rustc output.
