@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-apply_turboquant.py  —  Apply TurboQuant to a HuggingFace model folder
+turboquant.py  —  Apply TurboQuant to a HuggingFace model folder
 =======================================================================
 Loads all weight tensors from a model directory (.safetensors or .bin),
 quantizes every eligible 2-D weight matrix, and saves the result.
@@ -19,7 +19,7 @@ Two output modes
         - <name>.signs  : int8 signs     (QJL sketch, b≥2 only)
         - <name>.rnorm  : float32 norms  (QJL residual norms, b≥2 only)
         - <name>.meta   : JSON metadata  (d, b, codebook, rotation matrix)
-      A companion loader script (load_compressed.py) is written alongside.
+      A companion loader script (turboquant_loader.py) is written alongside.
       Use this to actually reduce on-disk/in-memory footprint.
 
 Quantizer choice
@@ -43,7 +43,9 @@ Usage examples
 
 Requirements
 ────────────
-  pip install torch safetensors numpy scipy
+  Python  ≥ 3.10  (required by PyTorch 2.6+)
+  PyTorch ≥ 2.6   (weights_only=True is default; 2.11 recommended)
+  pip install torch safetensors>=0.4 numpy scipy
 """
 
 import argparse
@@ -169,9 +171,35 @@ class _Prod:
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _find_weight_files(model_dir: Path) -> list[Path]:
-    """Return all .safetensors or .bin files in the model directory."""
-    st  = sorted(model_dir.glob("*.safetensors"))
-    pt  = sorted(model_dir.glob("*.bin"))
+    """Return all weight shard Paths, respecting HF sharded-index JSON if present.
+
+    Modern HuggingFace models split weights across numbered shards and record the
+    mapping in model.safetensors.index.json (or pytorch_model.bin.index.json).
+    When that index is present we extract the unique shard filenames from
+    ``weight_map`` so the caller gets them in a deterministic, deduplicated order
+    rather than relying on glob ordering alone.
+    """
+    # ── sharded safetensors index (preferred) ────────────────────────────────
+    st_index = model_dir / "model.safetensors.index.json"
+    if st_index.exists():
+        with open(st_index) as f:
+            weight_map = json.load(f).get("weight_map", {})
+        shards = sorted({model_dir / v for v in weight_map.values()})
+        if shards:
+            return shards
+
+    # ── sharded .bin index ────────────────────────────────────────────────────
+    pt_index = model_dir / "pytorch_model.bin.index.json"
+    if pt_index.exists():
+        with open(pt_index) as f:
+            weight_map = json.load(f).get("weight_map", {})
+        shards = sorted({model_dir / v for v in weight_map.values()})
+        if shards:
+            return shards
+
+    # ── flat (non-sharded) fallback ───────────────────────────────────────────
+    st = sorted(model_dir.glob("*.safetensors"))
+    pt = sorted(model_dir.glob("*.bin"))
     if st:
         return st
     if pt:
@@ -186,17 +214,17 @@ def _load_shard(path: Path) -> dict[str, torch.Tensor]:
     if path.suffix == ".safetensors":
         if not HAS_SAFETENSORS:
             raise ImportError("Install safetensors: pip install safetensors")
-        return st_load(str(path), device="cpu")
-    return torch.load(str(path), map_location="cpu", weights_only=True)
+        return st_load(path, device="cpu")
+    return torch.load(path, map_location="cpu", weights_only=True)
 
 
 def _save_shard(tensors: dict[str, torch.Tensor], path: Path):
     if path.suffix == ".safetensors":
         if not HAS_SAFETENSORS:
             raise ImportError("Install safetensors: pip install safetensors")
-        st_save(tensors, str(path))
+        st_save(tensors, path)
     else:
-        torch.save(tensors, str(path))
+        torch.save(tensors, path)
 
 
 def _is_quantizable(name: str, t: torch.Tensor, min_dim: int = 64) -> bool:
@@ -277,7 +305,23 @@ def _quantize_matrix(
     dq = dq_unit * row_norms
 
     mse_val = ((w - dq) ** 2).mean().item()
-    return dq.cpu(), mse_val
+
+    # Build the compressed payload (MSE quantizer only; Prod compressed not yet supported)
+    payload: dict | None = None
+    if quantizer == "mse" and isinstance(q, _MSE):
+        # Requantize unit vectors to collect final indices (cheap — codebook already built)
+        idx_rows = []
+        for start in range(0, rows, chunk):
+            idx_rows.append(q.quant(w_unit[start:start + chunk]))
+        payload = {
+            "idx":    torch.cat(idx_rows, dim=0).cpu(),       # (rows, d)  int16
+            "rnorm":  row_norms.squeeze(-1).cpu(),             # (rows,)    float32
+            "Pi":     q.Pi.cpu(),                              # (d, d)     float32
+            "cb":     q.cb.cpu(),                              # (2^b,)     float32
+            "d": d, "b": b,
+        }
+
+    return dq.cpu(), payload, mse_val
 
 
 def run(args):
@@ -329,12 +373,29 @@ def run(args):
             b = args.bits[0]
             print(f"  quant {name:60s}  {tuple(tensor.shape)}  b={b}", end="", flush=True)
 
-            dq, mse_val = _quantize_matrix(
+            dq, payload, mse_val = _quantize_matrix(
                 tensor, b, args.quantizer, codebooks, device, chunk=args.chunk
             )
 
-            # Keep the same dtype as the original (cast back if needed)
-            out_tensors[name] = dq.to(tensor.dtype)
+            # ── compressed save ──────────────────────────────────────────────
+            if args.mode == "compressed" and payload is not None:
+                safe_name = name.replace("/", "__").replace(".", "_")
+                comp_dir  = shard_path.parent / (shard_path.stem + "_tqcomp")
+                comp_dir.mkdir(exist_ok=True)
+                torch.save(payload["idx"],   comp_dir / f"{safe_name}.idx.pt")
+                torch.save(payload["rnorm"], comp_dir / f"{safe_name}.rnorm.pt")
+                meta = {
+                    "name": name, "d": payload["d"], "b": payload["b"],
+                    "Pi":   payload["Pi"].tolist(),
+                    "cb":   payload["cb"].tolist(),
+                }
+                with open(comp_dir / f"{safe_name}.meta.json", "w") as mf:
+                    json.dump(meta, mf)
+                # Placeholder in the shard keeps key present; loader replaces it
+                out_tensors[name] = torch.zeros(1)
+            else:
+                # Keep the same dtype as the original (cast back if needed)
+                out_tensors[name] = dq.to(tensor.dtype)
             quantized_params += tensor.numel()
             report_rows.append((name, tuple(tensor.shape), b, mse_val))
             print(f"  MSE={mse_val:.2e}")
