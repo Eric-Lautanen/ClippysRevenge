@@ -24,7 +24,7 @@ Quick usage
       model.get_parameter(name).data.copy_(weight)
 
   # Command-line: verify all layers reconstruct without error
-  python load_compressed.py --model ./llama-7b-tq3 [--device cpu]
+  python turboquant_loader.py --model ./llama-7b-tq3 [--device cpu]
 
 Requirements
 ────────────
