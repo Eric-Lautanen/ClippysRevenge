@@ -1,29 +1,39 @@
 #!/usr/bin/env python3
 """
-╔══════════════════════════════════════════════════════════╗
-║         RustScrape  —  Rust Training Data Collector      ║
-║        crates.io · rust-lang GitHub · Official Docs      ║
-╚══════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════╗
+║          RustScrape  —  Rust Training Data Collector             ║
+║   crates.io · GitHub · Official Docs · docs.rs API Docs         ║
+╚══════════════════════════════════════════════════════════════════╝
 
-Collects high-quality Rust source data from three sources:
+Collects high-quality, validated Rust source data from four sources:
 
-  1. crates.io  — Top N crates by downloads, extract all .rs files
-  2. GitHub     — rust-lang org repos + curated ecosystem crates
-  3. Docs       — The Rust Book, Reference, Nomicon, RFCs (markdown)
+  1. crates.io  — Top N crates by downloads + category-based + recently-updated
+                  Extracts: .rs source, Cargo.toml, build.rs, README/CHANGELOG
+                  Prefers latest STABLE version (not pre-release)
+  2. GitHub     — rust-lang org repos (15+) + 100+ curated ecosystem repos
+                  Covers: async, web, CLI, databases, crypto, embedded, game-dev,
+                  data processing, compilers, infrastructure, and more
+  3. Docs       — 25+ official & community books/guides with code-block-preserving
+                  HTML extraction (Rust Book, Reference, Nomicon, Compiler Dev Guide,
+                  API Guidelines, Atomics & Locks, and more)
+  4. docs.rs    — Rendered API documentation for 70+ top crates
+                  Type signatures, examples, trait impls, module docs
 
 Output: JSONL files per source in <output-dir>/
   ./rust_data/crates/    — one JSONL per crate
   ./rust_data/github/    — one JSONL per repo
   ./rust_data/docs/      — one JSONL per doc source
+  ./rust_data/docsrs/    — one JSONL per crate's API docs
 
 Each record:
   {
-    "source":    "crates.io" | "github" | "docs",
-    "origin":    "tokio",
-    "path":      "src/runtime/mod.rs",
-    "content":   "...",
-    "tokens_est": 1842,
-    "scraped_at": 1234567890
+    "source":       "crates.io" | "github" | "docs" | "docsrs",
+    "origin":       "tokio",
+    "path":         "src/runtime/mod.rs",
+    "content_type": "rust_code" | "documentation" | "config" | "build_script" | "api_documentation",
+    "content":      "...",
+    "tokens_est":   1842,
+    "scraped_at":   1234567890
   }
 
 Requirements:
@@ -31,8 +41,10 @@ Requirements:
 
 Usage:
     python scraper.py crates  --top 500 --output-dir ./rust_data
+    python scraper.py crates  --top 500 --no-categories --no-recent
     python scraper.py github  --output-dir ./rust_data [--token ghp_xxx]
     python scraper.py docs    --output-dir ./rust_data
+    python scraper.py docsrs  --output-dir ./rust_data
     python scraper.py all     --output-dir ./rust_data [--token ghp_xxx]
     python scraper.py stats   --output-dir ./rust_data
 
@@ -190,16 +202,32 @@ def write_record(path: Path, record: dict) -> None:
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=True) + "\n")
 
+def _detect_content_type(path: str) -> str:
+    """Classify content type from file path for downstream filtering."""
+    p = Path(path).name.lower() if not path.startswith("http") else path
+    ext = Path(path).suffix.lower() if not path.startswith("http") else ""
+
+    if ext == ".rs":
+        return "rust_code"
+    if ext in (".md", ".rst", ".txt") or path.startswith("http"):
+        return "documentation"
+    if ext == ".toml":
+        return "config"
+    if Path(path).name.lower() == "build.rs":
+        return "build_script"
+    return "documentation"
+
 def make_record(
     source: str, origin: str, path: str, content: str, **extra
 ) -> dict:
     return {
-        "source":     source,
-        "origin":     origin,
-        "path":       path,
-        "content":    content,
-        "tokens_est": estimate_tokens(content),
-        "scraped_at": int(time.time()),
+        "source":       source,
+        "origin":       origin,
+        "path":         path,
+        "content_type": extra.pop("content_type", None) or _detect_content_type(path),
+        "content":      content,
+        "tokens_est":   estimate_tokens(content),
+        "scraped_at":   int(time.time()),
         **extra,
     }
 
@@ -218,17 +246,27 @@ def make_session(github_token: Optional[str] = None) -> requests.Session:
 #  FILE FILTERS
 # ─────────────────────────────────────────────────────────
 
-# Paths to skip — generated code, fixtures, test data, vendor dirs
+# Paths to skip — generated code, fixtures, test data, vendor dirs, forums
 _SKIP_PATH_PARTS = {
     "vendor", "node_modules", ".git", ".github", "target",
-    "generated", "gen", "proto",
+    "generated", "gen", "proto", "third_party", "third-party",
+    "fuzz", "fuzzing", "fuzz_targets",
+    "benches", "benchmark", "benchmarks",   # benchmark code is repetitive boilerplate
+    "fixtures", "testdata", "test_data", "test-data",
+    "examples",  # often incomplete snippets; we get better examples from docs
+    "migrations", "schema",                 # SQL migrations, not Rust patterns
+    "assets", "static", "public",           # non-code assets
 }
 _SKIP_PATH_SUFFIXES = {
     ".pb.rs",          # protobuf generated
     "_generated.rs",   # common generated pattern
+    "_test.rs",        # test-only files (test patterns are in the main files too)
+    ".min.rs",         # minified
 }
 _SKIP_FILENAMES = {
     "bindgen_output.rs", "bindings.rs",
+    "ffi.rs",            # often just extern declarations
+    "sys.rs",            # usually raw FFI
 }
 
 def should_skip_path(path_str: str) -> bool:
@@ -245,8 +283,8 @@ def should_skip_path(path_str: str) -> bool:
 
 def is_quality_rust(content: str) -> bool:
     """
-    Basic quality filter — reject files that are just
-    auto-generated, empty, or contain no real code.
+    Quality filter — reject files that are auto-generated, empty,
+    contain no real code, or are forum/community noise.
     """
     if not content.strip():
         return False
@@ -257,6 +295,21 @@ def is_quality_rust(content: str) -> bool:
     ascii_ratio = sum(1 for c in content if ord(c) < 128) / max(len(content), 1)
     if ascii_ratio < 0.8:
         return False
+    # Reject auto-generated files (common header patterns)
+    first_lines = content[:500].lower()
+    gen_markers = [
+        "auto-generated", "automatically generated", "do not edit",
+        "generated by", "this file is generated", "@generated",
+        "machine generated", "code generated",
+    ]
+    if any(m in first_lines for m in gen_markers):
+        return False
+    # Reject files that are mostly comments (>70% lines start with //)
+    lines = [l.strip() for l in content.split("\n") if l.strip()]
+    if lines:
+        comment_ratio = sum(1 for l in lines if l.startswith("//")) / len(lines)
+        if comment_ratio > 0.7 and len(lines) > 10:
+            return False
     return True
 
 # ─────────────────────────────────────────────────────────
@@ -325,6 +378,118 @@ def fetch_top_crates(session: requests.Session, top: int) -> list[dict]:
 
     return crates[:top]
 
+# ── Category-based crate discovery ──────────────────────────────────────
+# These categories ensure domain diversity beyond pure popularity.
+# Top-by-downloads is biased toward older utility crates; categories cover
+# emerging domains like async, wasm, embedded, game-dev, etc.
+_CRATE_CATEGORIES = [
+    "asynchronous",
+    "web-programming",
+    "web-programming::http-server",
+    "web-programming::http-client",
+    "command-line-utilities",
+    "network-programming",
+    "database",
+    "cryptography",
+    "embedded",
+    "wasm",
+    "game-engines",
+    "gui",
+    "parsing",
+    "algorithms",
+    "data-structures",
+    "concurrency",
+    "encoding",
+    "filesystem",
+    "os",
+    "science",
+    "mathematics",
+    "compilers",
+    "development-tools::testing",
+    "development-tools::debugging",
+    "development-tools::procedural-macro-helpers",
+    "memory-management",
+    "no-std",
+]
+
+def fetch_crates_by_category(
+    session: requests.Session, per_category: int = 20
+) -> list[dict]:
+    """
+    Fetch the top crates from each category to ensure domain diversity.
+    Returns deduplicated list (a crate may appear in multiple categories).
+    """
+    seen_ids: set[str] = set()
+    crates: list[dict] = []
+
+    console.print(
+        f"[info]Fetching top {per_category} crates from "
+        f"{len(_CRATE_CATEGORIES)} categories...[/info]"
+    )
+
+    for cat in _CRATE_CATEGORIES:
+        if _shutdown.is_set():
+            break
+        url = (
+            f"{CRATES_API}/crates?category={cat}"
+            f"&sort=downloads&per_page={per_category}&page=1"
+        )
+        try:
+            r = session.get(url, timeout=API_TIMEOUT)
+            r.raise_for_status()
+            batch = r.json().get("crates", [])
+            new = 0
+            for c in batch:
+                if c["id"] not in seen_ids:
+                    seen_ids.add(c["id"])
+                    crates.append(c)
+                    new += 1
+            console.print(
+                f"[info]  {cat}: {len(batch)} crates, {new} new[/info]"
+            )
+        except Exception as e:
+            log.warning(f"Category fetch failed {cat}: {e}")
+        time.sleep(CRATES_API_DELAY)
+
+    console.print(f"[info]Category discovery: {len(crates)} unique crates[/info]")
+    return crates
+
+def fetch_recently_updated_crates(
+    session: requests.Session, top: int = 200
+) -> list[dict]:
+    """
+    Fetch recently updated crates to capture modern Rust idioms and
+    latest edition patterns. Complements the all-time-downloads list.
+    """
+    crates = []
+    per_page = 100
+    page = 1
+    console.print(f"[info]Fetching top {top} recently-updated crates...[/info]")
+
+    while len(crates) < top:
+        url = (
+            f"{CRATES_API}/crates?sort=recent-updates"
+            f"&per_page={per_page}&page={page}"
+        )
+        try:
+            r = session.get(url, timeout=API_TIMEOUT)
+            r.raise_for_status()
+            batch = r.json().get("crates", [])
+            if not batch:
+                break
+            # Only keep crates with meaningful download counts (>1000)
+            # to filter out spam/test crates
+            quality = [c for c in batch if c.get("downloads", 0) >= 1000]
+            crates.extend(quality)
+            page += 1
+            time.sleep(CRATES_API_DELAY)
+        except Exception as e:
+            log.warning(f"Recent crates API error page {page}: {e}")
+            time.sleep(CRATES_API_DELAY * 3)
+
+    console.print(f"[info]Recently-updated: {len(crates[:top])} quality crates[/info]")
+    return crates[:top]
+
 def download_crate_tarball(
     session: requests.Session, name: str, version: str
 ) -> Optional[bytes]:
@@ -358,10 +523,20 @@ def _is_crate_doc(rel_path: str) -> bool:
         return True
     return False
 
+# Files worth extracting beyond .rs — teach the model about project structure
+_CONFIG_FILENAMES = {"Cargo.toml", "build.rs", "lib.rs", "main.rs"}
+
+def _is_config_file(rel_path: str) -> bool:
+    """True for Cargo.toml and build.rs at any depth."""
+    name = Path(rel_path).name
+    return name in ("Cargo.toml", "build.rs")
+
 def extract_rs_files(tarball_bytes: bytes) -> Iterator[tuple[str, str]]:
     """
-    Yield (path, content) for .rs source files AND documentation files
-    (README, CHANGELOG, docs/*.md) found in a .crate tarball.
+    Yield (path, content) for:
+      - .rs source files
+      - Documentation files (README, CHANGELOG, docs/*.md)
+      - Cargo.toml and build.rs (project structure / build configuration)
     """
     try:
         with tarfile.open(fileobj=io.BytesIO(tarball_bytes), mode="r:gz") as tar:
@@ -372,8 +547,9 @@ def extract_rs_files(tarball_bytes: bytes) -> Iterator[tuple[str, str]]:
                 # Strip the crate-version prefix (e.g. tokio-1.35.0/src/lib.rs → src/lib.rs)
                 parts    = member.name.split("/", 1)
                 rel_path = parts[1] if len(parts) > 1 else member.name
-                is_doc = _is_crate_doc(rel_path)
-                if not (is_rs or is_doc):
+                is_doc    = _is_crate_doc(rel_path)
+                is_config = _is_config_file(rel_path)
+                if not (is_rs or is_doc or is_config):
                     continue
                 if member.size > MAX_FILE_BYTES or member.size < MIN_FILE_BYTES:
                     continue
@@ -399,15 +575,32 @@ def scrape_crates(args: argparse.Namespace) -> None:
     stats   = Stats()
     layout  = _make_layout()
 
+    # Merge multiple discovery strategies for comprehensive coverage
     crates_meta = fetch_top_crates(session, args.top)
-    to_scrape   = [
+    seen_ids = {c["id"] for c in crates_meta}
+
+    if not _shutdown.is_set() and getattr(args, "categories", True):
+        cat_crates = fetch_crates_by_category(session, per_category=20)
+        for c in cat_crates:
+            if c["id"] not in seen_ids:
+                seen_ids.add(c["id"])
+                crates_meta.append(c)
+
+    if not _shutdown.is_set() and getattr(args, "recent", True):
+        recent = fetch_recently_updated_crates(session, top=200)
+        for c in recent:
+            if c["id"] not in seen_ids:
+                seen_ids.add(c["id"])
+                crates_meta.append(c)
+
+    to_scrape = [
         c for c in crates_meta
         if c["id"] not in _CRATES_EXCLUDE and not manifest.is_done(c["id"])
     ]
     already = manifest.count()
 
     console.print(
-        f"[info]Top {args.top} crates fetched. "
+        f"[info]{len(crates_meta)} total unique crates discovered. "
         f"{already} already done, {len(to_scrape)} to scrape.[/info]"
     )
 
@@ -424,7 +617,8 @@ def scrape_crates(args: argparse.Namespace) -> None:
                 break
 
             name    = crate["id"]
-            version = crate["newest_version"]
+            # Prefer the latest stable version; fall back to newest if no stable exists
+            version = crate.get("max_stable_version") or crate["newest_version"]
             stats.current_item = f"{name}  v{version}"
             stats.current_file = "downloading tarball..."
             _refresh()
@@ -563,7 +757,7 @@ _ECOSYSTEM_REPOS = [
     ("BurntSushi",       "ripgrep"),
     ("BurntSushi",       "xsv"),             # CSV toolkit — clean idiomatic code
     ("BurntSushi",       "regex"),
-    ("rust-lang",        "regex"),
+    # rust-lang/regex is in _RUSTLANG_REPOS
     ("sharkdp",          "bat"),
     ("sharkdp",          "fd"),              # modern find replacement
     ("sharkdp",          "hyperfine"),       # benchmarking tool
@@ -586,7 +780,7 @@ _ECOSYSTEM_REPOS = [
     # ── Build tools & dev infrastructure ─────────────────────────────────────
     ("LukeMathWalker",   "cargo-chef"),
     ("mozilla",          "sccache"),         # shared compilation cache
-    ("rust-lang",        "crates.io"),       # the crates.io site itself is Rust
+    # rust-lang/crates.io is in _RUSTLANG_REPOS
     ("cargo-bins",       "cargo-binstall"),
     # ── WebAssembly ──────────────────────────────────────────────────────────
     ("bytecodealliance", "wasmtime"),
@@ -644,7 +838,7 @@ _ECOSYSTEM_REPOS = [
     ("firecracker-microvm","firecracker"),   # AWS microVM
     ("cloudflare",       "pingora"),         # HTTP proxy framework
     ("tikv",             "tikv"),            # distributed KV store
-    ("vectordotdev",     "vector"),          # data pipeline (already present but ensuring)
+    # vectordotdev/vector is already listed above
     ("containers",       "youki"),           # OCI container runtime
     ("kata-containers",  "kata-containers"), # secure containers
     # ── Compiler & language tooling ──────────────────────────────────────────
@@ -656,7 +850,7 @@ _ECOSYSTEM_REPOS = [
     ("dtolnay",          "async-trait"),     # async in traits (pre-stabilization patterns)
     ("dtolnay",          "cxx"),             # safe C++ FFI
     ("tokio-rs",         "console"),         # async debugging tool
-    ("rust-lang",        "futures-rs"),      # futures utilities (also in rust-lang repos)
+    # rust-lang/futures-rs is in _RUSTLANG_REPOS
     # ── Cryptography & networking (more) ─────────────────────────────────────
     ("rustls",           "rustls-ffi"),      # C API for rustls
     ("briansmith",       "ring"),            # crypto primitives
@@ -671,7 +865,7 @@ _ECOSYSTEM_REPOS = [
     ("assert-rs",        "predicates-rs"),   # test assertions
     ("proptest-rs",      "proptest"),        # property-based testing
     ("la10736",          "rstest"),          # test fixtures
-    ("cargo-bins",       "cargo-binstall"),  # (already present)
+    # cargo-bins/cargo-binstall is already listed above
     ("mozilla",          "grcov"),           # code coverage
 ]
 
@@ -723,6 +917,7 @@ def extract_rs_from_github_archive(
 ) -> Iterator[tuple[str, str]]:
     """
     Yield (path, content) from a GitHub archive tarball.
+    Always includes Cargo.toml and build.rs for project structure context.
     Optionally includes .md files too (for docs repos).
     """
     if also_markdown:
@@ -732,7 +927,10 @@ def extract_rs_from_github_archive(
             for member in tar.getmembers():
                 if not member.isfile():
                     continue
-                if not any(member.name.endswith(ext) for ext in extensions):
+                name_lower = member.name.lower()
+                has_ext = any(member.name.endswith(ext) for ext in extensions)
+                is_config = Path(member.name).name in ("Cargo.toml", "build.rs")
+                if not (has_ext or is_config):
                     continue
                 if member.size > MAX_FILE_BYTES or member.size < MIN_FILE_BYTES:
                     continue
@@ -1098,19 +1296,108 @@ def _discover_chapters(session: requests.Session, base_url: str) -> list[str]:
     return chapters if chapters else ["index.html"]
 
 
-def _html_to_text(html: str) -> str:
-    """Very light HTML → text: strip tags, decode entities, normalize whitespace."""
-    # Remove script and style blocks
-    html = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.IGNORECASE)
-    # Strip all tags
-    text = re.sub(r"<[^>]+>", " ", html)
-    # Decode common HTML entities
+def _decode_entities(text: str) -> str:
+    """Decode common HTML entities."""
     entities = {"&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"',
-                 "&#39;": "'", "&apos;": "'", "&nbsp;": " ", "&#x27;": "'"}
+                "&#39;": "'", "&apos;": "'", "&nbsp;": " ", "&#x27;": "'",
+                "&#x2F;": "/", "&mdash;": "—", "&ndash;": "–", "&hellip;": "…",
+                "&#10;": "\n"}
     for ent, char in entities.items():
         text = text.replace(ent, char)
-    # Normalize whitespace
-    text = re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]+", " ", text))
+    # Numeric entities (decimal + hex)
+    text = re.sub(r"&#(\d+);",       lambda m: chr(int(m.group(1))),     text)
+    text = re.sub(r"&#x([0-9a-fA-F]+);", lambda m: chr(int(m.group(1), 16)), text)
+    return text
+
+def _html_to_text(html: str) -> str:
+    """
+    HTML → text that preserves code blocks as fenced markdown.
+    This is critical for doc pages — code examples are training gold.
+    """
+    # Remove script, style, nav, and footer blocks
+    html = re.sub(
+        r"<(script|style|nav|footer|head)[^>]*>.*?</\1>",
+        "", html, flags=re.DOTALL | re.IGNORECASE,
+    )
+
+    # ── Extract <pre><code> blocks and replace with placeholders ─────────
+    code_blocks: list[str] = []
+
+    def _capture_code(m: re.Match) -> str:
+        raw = m.group(1)
+        # Detect language from class="language-rust" or class="rust" etc.
+        lang_m = re.search(r'class="[^"]*(?:language-)?(\w+)', m.group(0))
+        lang = lang_m.group(1) if lang_m else "rust"
+        # Strip inner tags (syntax highlighting spans)
+        code_text = re.sub(r"<[^>]+>", "", raw)
+        code_text = _decode_entities(code_text).strip()
+        idx = len(code_blocks)
+        code_blocks.append(f"\n```{lang}\n{code_text}\n```\n")
+        return f"\n__CODE_BLOCK_{idx}__\n"
+
+    # Match <pre...><code...>...</code></pre> (most doc sites)
+    html = re.sub(
+        r"<pre[^>]*>\s*<code[^>]*>(.*?)</code>\s*</pre>",
+        _capture_code, html, flags=re.DOTALL | re.IGNORECASE,
+    )
+    # Also match bare <pre> blocks without <code>
+    html = re.sub(
+        r"<pre[^>]*>(.*?)</pre>",
+        _capture_code, html, flags=re.DOTALL | re.IGNORECASE,
+    )
+
+    # ── Inline code: <code>...</code> → backticks ────────────────────────
+    def _inline_code(m: re.Match) -> str:
+        inner = re.sub(r"<[^>]+>", "", m.group(1))
+        inner = _decode_entities(inner).strip()
+        return f"`{inner}`" if inner else ""
+
+    html = re.sub(r"<code[^>]*>(.*?)</code>", _inline_code, html, flags=re.DOTALL)
+
+    # ── Headings → markdown headings ─────────────────────────────────────
+    for level in range(1, 7):
+        html = re.sub(
+            rf"<h{level}[^>]*>(.*?)</h{level}>",
+            lambda m, l=level: f"\n{'#' * l} {re.sub(r'<[^>]+>', '', m.group(1)).strip()}\n",
+            html, flags=re.DOTALL | re.IGNORECASE,
+        )
+
+    # ── Lists → plain text with bullets ──────────────────────────────────
+    html = re.sub(r"<li[^>]*>",  "\n- ", html, flags=re.IGNORECASE)
+    html = re.sub(r"</li>",       "",     html, flags=re.IGNORECASE)
+
+    # ── Paragraphs & breaks → newlines ───────────────────────────────────
+    html = re.sub(r"<br\s*/?>",      "\n",   html, flags=re.IGNORECASE)
+    html = re.sub(r"</?p[^>]*>",     "\n",   html, flags=re.IGNORECASE)
+    html = re.sub(r"</?div[^>]*>",   "\n",   html, flags=re.IGNORECASE)
+    html = re.sub(r"</?blockquote[^>]*>", "\n> ", html, flags=re.IGNORECASE)
+
+    # ── Strip all remaining tags ─────────────────────────────────────────
+    text = re.sub(r"<[^>]+>", " ", html)
+
+    # ── Decode entities in the body text ─────────────────────────────────
+    text = _decode_entities(text)
+
+    # ── Re-insert code blocks ────────────────────────────────────────────
+    for idx, block in enumerate(code_blocks):
+        text = text.replace(f"__CODE_BLOCK_{idx}__", block)
+
+    # ── Normalize whitespace (but preserve code block formatting) ────────
+    lines = text.split("\n")
+    result: list[str] = []
+    in_code = False
+    for line in lines:
+        if line.strip().startswith("```"):
+            in_code = not in_code
+            result.append(line)
+        elif in_code:
+            result.append(line)  # preserve code indentation exactly
+        else:
+            cleaned = re.sub(r"[ \t]+", " ", line).strip()
+            result.append(cleaned)
+
+    text = "\n".join(result)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 def scrape_docs(args: argparse.Namespace) -> None:
@@ -1203,6 +1490,188 @@ def scrape_docs(args: argparse.Namespace) -> None:
     _print_final_stats(stats, "Docs", manifest)
 
 # ─────────────────────────────────────────────────────────
+#  SOURCE 4: docs.rs — API documentation for top crates
+# ─────────────────────────────────────────────────────────
+
+# docs.rs serves server-side rendered rustdoc pages.
+# The /crate/{name}/{version} page has a sidebar with all modules.
+# The actual doc pages contain type signatures, examples, trait impls —
+# extremely high-quality structured content for LLM training.
+
+_DOCSRS_BASE = "https://docs.rs"
+_DOCSRS_DELAY = 0.8  # be polite to docs.rs
+
+# Top crates to fetch API docs for — these are the ones developers
+# actually look up documentation for constantly
+_DOCSRS_CRATES = [
+    "tokio", "serde", "serde_json", "clap", "reqwest", "hyper", "axum",
+    "actix-web", "tracing", "anyhow", "thiserror", "rand", "chrono",
+    "regex", "rayon", "crossbeam", "bytes", "futures", "async-trait",
+    "itertools", "syn", "quote", "proc-macro2", "sqlx", "diesel",
+    "rusqlite", "tower", "tonic", "warp", "poem", "sea-orm",
+    "uuid", "url", "once_cell", "lazy_static", "log", "env_logger",
+    "tracing-subscriber", "config", "dotenv", "structopt",
+    "nom", "pest", "winnow", "chumsky",
+    "image", "rustls", "ring", "sha2", "aes", "rsa",
+    "nix", "libc", "windows", "mio",
+    "indexmap", "smallvec", "tinyvec", "arrayvec", "dashmap",
+    "parking_lot", "flume", "kanal",
+    "polars", "arrow", "datafusion",
+    "bevy", "wgpu", "iced",
+    "leptos", "dioxus", "yew",
+    "tauri", "egui", "ratatui",
+    "prost", "tungstenite", "tokio-tungstenite",
+    "criterion", "proptest", "rstest",
+    "sled", "redb", "rocksdb",
+    "aws-sdk-s3", "aws-config",
+]
+
+def _docsrs_discover_modules(
+    session: requests.Session, crate_name: str
+) -> list[str]:
+    """
+    Discover documentation pages for a crate on docs.rs.
+    Returns a list of relative URL paths (e.g., 'tokio/runtime/index.html').
+    """
+    # The "all items" page lists every public item
+    all_url = f"{_DOCSRS_BASE}/{crate_name}/latest/{crate_name}/all.html"
+    try:
+        r = session.get(all_url, timeout=API_TIMEOUT)
+        if r.status_code != 200:
+            # Try the main index instead
+            r = session.get(
+                f"{_DOCSRS_BASE}/{crate_name}/latest/{crate_name}/",
+                timeout=API_TIMEOUT,
+            )
+            if r.status_code != 200:
+                return []
+
+        # Extract module/struct/trait/fn page links
+        hrefs = re.findall(
+            rf'href="(/(?:{crate_name}|crate/{crate_name})/[^"#?]*\.html)"',
+            r.text,
+        )
+        # Also grab relative hrefs
+        rel_hrefs = re.findall(r'href="([^"#?]*(?:index|struct\.|enum\.|trait\.|fn\.|type\.|macro\.)[^"#?]*\.html)"', r.text)
+
+        seen: set[str] = set()
+        pages: list[str] = []
+        for h in hrefs + rel_hrefs:
+            # Normalize to full URL path
+            if h.startswith("/"):
+                full = f"{_DOCSRS_BASE}{h}"
+            elif h.startswith("http"):
+                full = h
+            else:
+                full = f"{_DOCSRS_BASE}/{crate_name}/latest/{crate_name}/{h}"
+
+            if full not in seen and crate_name in full:
+                seen.add(full)
+                pages.append(full)
+
+        # Always include the main index
+        main_idx = f"{_DOCSRS_BASE}/{crate_name}/latest/{crate_name}/index.html"
+        if main_idx not in seen:
+            pages.insert(0, main_idx)
+
+        # Cap at 100 pages per crate to avoid huge crates overwhelming
+        return pages[:100]
+    except Exception as e:
+        log.warning(f"docs.rs discovery failed for {crate_name}: {e}")
+        return []
+
+def _docsrs_extract_content(html: str) -> str:
+    """
+    Extract meaningful content from a docs.rs page.
+    Focuses on: type signatures, doc comments, code examples, trait impls.
+    Strips navigation, sidebar, and other chrome.
+    """
+    # Remove sidebar, nav, and footer
+    html = re.sub(
+        r'<(nav|aside|footer|header)[^>]*>.*?</\1>',
+        "", html, flags=re.DOTALL | re.IGNORECASE,
+    )
+    # Remove the search/settings UI
+    html = re.sub(r'<div[^>]*id="settings"[^>]*>.*?</div>', "", html, flags=re.DOTALL)
+    # Use our improved HTML-to-text
+    return _html_to_text(html)
+
+def scrape_docsrs(args: argparse.Namespace) -> None:
+    """Scrape API documentation from docs.rs for top crates."""
+    outdir   = args.output_dir
+    session  = make_session()
+    manifest = Manifest(outdir, "docsrs")
+    stats    = Stats()
+    layout   = _make_layout()
+
+    to_scrape = [c for c in _DOCSRS_CRATES if not manifest.is_done(c)]
+    already   = manifest.count()
+
+    console.print(
+        f"[info]docs.rs: {len(_DOCSRS_CRATES)} crates total. "
+        f"{already} already done, {len(to_scrape)} to scrape.[/info]"
+    )
+
+    with Live(layout, console=console, refresh_per_second=4, screen=False):
+
+        def _refresh():
+            layout["header"].update(_header_panel(stats, "docs.rs"))
+            layout["item"].update(_item_panel(stats))
+
+        _refresh()
+
+        for crate_name in to_scrape:
+            if _shutdown.is_set():
+                break
+
+            stats.current_item = crate_name
+            stats.current_file = "discovering modules..."
+            _refresh()
+
+            pages = _docsrs_discover_modules(session, crate_name)
+            if not pages:
+                stats.files_skipped += 1
+                manifest.mark_done(crate_name)
+                continue
+
+            out_path = output_path(outdir, "docsrs", crate_name)
+            count = 0
+
+            for page_url in pages:
+                if _shutdown.is_set():
+                    break
+                stats.current_file = page_url.split("/")[-1]
+                _refresh()
+
+                try:
+                    r = session.get(page_url, timeout=API_TIMEOUT)
+                    r.raise_for_status()
+                    text = _docsrs_extract_content(r.text)
+                    if len(text.strip()) >= MIN_FILE_BYTES:
+                        record = make_record(
+                            source="docsrs", origin=crate_name,
+                            path=page_url, content=text,
+                            content_type="api_documentation",
+                        )
+                        write_record(out_path, record)
+                        stats.files_written += 1
+                        stats.bytes_written += len(text.encode("utf-8"))
+                        stats.tokens_est    += record["tokens_est"]
+                        count += 1
+                except Exception as e:
+                    log.warning(f"docs.rs page failed {page_url}: {e}")
+                    stats.errors += 1
+
+                time.sleep(_DOCSRS_DELAY)
+
+            if count == 0:
+                stats.files_skipped += 1
+            manifest.mark_done(crate_name)
+            _refresh()
+
+    _print_final_stats(stats, "docs.rs", manifest)
+
+# ─────────────────────────────────────────────────────────
 #  STATS COMMAND
 # ─────────────────────────────────────────────────────────
 
@@ -1214,7 +1683,7 @@ def stats_cmd(args: argparse.Namespace) -> None:
         console.print(f"[error]Output directory not found: {outdir}[/error]")
         return
 
-    sources = ["crates", "github", "docs"]
+    sources = ["crates", "github", "docs", "docsrs"]
     totals  = defaultdict(lambda: {"files": 0, "records": 0, "tokens": 0, "mb": 0.0})
 
     for source in sources:
@@ -1263,7 +1732,7 @@ def stats_cmd(args: argparse.Namespace) -> None:
 
     # Manifest counts
     console.print()
-    for source in ["crates", "github", "docs"]:
+    for source in ["crates", "github", "docs", "docsrs"]:
         m = Manifest(outdir, source)
         console.print(f"  [source]{source:<8}[/source] manifest: {m.count():,} items completed")
 
@@ -1287,14 +1756,16 @@ def _print_final_stats(stats: Stats, source_name: str, manifest: Manifest) -> No
 def main() -> None:
     p = argparse.ArgumentParser(
         prog="rustscrape",
-        description="Rust training data scraper — crates.io · GitHub · Docs",
+        description="Rust training data scraper — crates.io · GitHub · Docs · docs.rs",
     )
     sub = p.add_subparsers(dest="command")
 
     # crates
     c = sub.add_parser("crates", help="Scrape top crates from crates.io")
-    c.add_argument("--top",        type=int, default=500,       help="Number of top crates (default: 500)")
-    c.add_argument("--output-dir", type=str, default="./rust_data")
+    c.add_argument("--top",           type=int, default=500,  help="Number of top crates (default: 500)")
+    c.add_argument("--no-categories", action="store_true",    help="Skip category-based discovery")
+    c.add_argument("--no-recent",     action="store_true",    help="Skip recently-updated crate discovery")
+    c.add_argument("--output-dir",    type=str, default="./rust_data")
 
     # github
     g = sub.add_parser("github", help="Scrape rust-lang org and ecosystem repos")
@@ -1306,11 +1777,17 @@ def main() -> None:
     d = sub.add_parser("docs", help="Scrape official Rust documentation")
     d.add_argument("--output-dir", type=str, default="./rust_data")
 
+    # docsrs
+    dr = sub.add_parser("docsrs", help="Scrape API docs from docs.rs for top crates")
+    dr.add_argument("--output-dir", type=str, default="./rust_data")
+
     # all
     a = sub.add_parser("all", help="Run all scrapers in sequence")
-    a.add_argument("--token",      type=str, default=None)
-    a.add_argument("--top",        type=int, default=500)
-    a.add_argument("--output-dir", type=str, default="./rust_data")
+    a.add_argument("--token",         type=str, default=None)
+    a.add_argument("--top",           type=int, default=500)
+    a.add_argument("--no-categories", action="store_true")
+    a.add_argument("--no-recent",     action="store_true")
+    a.add_argument("--output-dir",    type=str, default="./rust_data")
 
     # stats
     s = sub.add_parser("stats", help="Print dataset statistics")
@@ -1318,18 +1795,28 @@ def main() -> None:
 
     args = p.parse_args()
 
+    # Normalize flags for crate discovery
+    if hasattr(args, "no_categories"):
+        args.categories = not args.no_categories
+    if hasattr(args, "no_recent"):
+        args.recent = not args.no_recent
+
     if args.command == "crates":
         scrape_crates(args)
     elif args.command == "github":
         scrape_github(args)
     elif args.command == "docs":
         scrape_docs(args)
+    elif args.command == "docsrs":
+        scrape_docsrs(args)
     elif args.command == "all":
         scrape_crates(args)
         if not _shutdown.is_set():
             scrape_github(args)
         if not _shutdown.is_set():
             scrape_docs(args)
+        if not _shutdown.is_set():
+            scrape_docsrs(args)
     elif args.command == "stats":
         stats_cmd(args)
     else:
