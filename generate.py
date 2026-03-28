@@ -6,8 +6,7 @@
 ╚══════════════════════════════════════════════════════════╝
 
 Usage (PowerShell — all one line):
-    python generate.py generate --models "model-id-1" "model-id-2" --count 50000 --rotate-every 200 --output-dir ./convos
-
+python generate.py generate --models "qwen3.5-4b@q3_k_m" "qwen3.5-4b@q3_k_m" "qwen3.5-4b@q3_k_m" --count 50000 --rotate-every 50 --output-dir ./convos/rust
     python generate.py stats  --output-dir ./convos
     python generate.py sample --output-dir ./convos --category rust_ownership
 
