@@ -83,11 +83,16 @@ _LOOKS_LIKE_RUST = re.compile(
     re.MULTILINE,
 )
 _PROSE_LINE = re.compile(r"^[A-Z`'\u2018\u2019\u201c\u201d][^\n]{20,}$")
+# Short prose labels like "Context:", "Example:", "Note:" that the long-line check misses
+_PROSE_LABEL = re.compile(r"^[A-Z][a-zA-Z ]{2,20}:\s*$", re.MULTILINE)
 
 # E0432 / E0433 — unresolved crate reference
 _E_UNRESOLVED = re.compile(
-    r"(?:use of unresolved module or unlinked crate|unresolved import|"
-    r"no external crate)\s+`([a-zA-Z_][a-zA-Z0-9_]*)",
+    r"(?:use of unresolved module or unlinked crate"
+    r"|unresolved import"
+    r"|no external crate"
+    r"|could not find `.+?` in the list of imported crates"
+    r"|failed to resolve: could not find)"
 )
 
 # ─────────────────────────────────────────────────────────
@@ -96,23 +101,22 @@ _E_UNRESOLVED = re.compile(
 
 def _uses_external_crates(code: str) -> list[str]:
     """
-    Return a sorted list of crate root names that appear to be external
-    (i.e. not std/core/alloc/self/super/crate).
-    An empty list means the code is pure-std.
+    Return external crate names referenced by `use` or `extern crate` statements.
+    Only inspects explicit import declarations — no heuristic `::` scanning, which
+    produces false positives on std types like Vec::new() or mem::size_of().
+    An empty list means the code appears to be pure-std (cargo is the final arbiter).
     """
     found: set[str] = set()
     for m in re.finditer(r"^use\s+([a-zA-Z_][a-zA-Z0-9_]*)", code, re.MULTILINE):
         found.add(m.group(1))
     for m in re.finditer(r"^extern\s+crate\s+([a-zA-Z_][a-zA-Z0-9_]*)", code, re.MULTILINE):
         found.add(m.group(1))
-    for m in re.finditer(r"(?:^|[^a-zA-Z0-9_])([a-zA-Z_][a-zA-Z0-9_]*)::", code):
-        found.add(m.group(1))
     found -= _STD_MODULES
     return sorted(found)
 
 
 def _cargo_mentions_external_crates(stderr: str) -> bool:
-    """True if cargo stderr contains E0432/E0433 (unresolved external crate)."""
+    """True if cargo stderr indicates a missing external crate (E0432/E0433)."""
     return bool(_E_UNRESOLVED.search(stderr))
 
 
@@ -136,6 +140,7 @@ def _strip_leading_prose(code: str) -> str:
 
 def _preprocess(code: str) -> str:
     code = _strip_leading_prose(code)
+    code = _PROSE_LABEL.sub("", code)
     code = _PYTHON_COMMENT.sub("", code)
     code = _MOD_FILE_DECL.sub(r"\1 {}", code)
     return code
@@ -322,16 +327,16 @@ def validate_record(record: dict) -> tuple[bool, dict, str]:
         reason = "empty fixed_code"
         return False, _make_failure_record(record, reason), reason
 
-    # Fast pre-check: reject immediately if the raw code references external crates
-    fixed = (record.get("fixed_code") or "").strip()
-    external = _uses_external_crates(fixed)
-    if external:
-        reason = f"requires external crates: {', '.join(external[:5])}"
-        return False, _make_failure_record(record, reason), reason
-
     last_errors: list[str] = []
 
     for label, raw_code in candidates:
+        # Pre-check each candidate for explicit external crate imports before
+        # spinning up a cargo process.
+        external = _uses_external_crates(raw_code)
+        if external:
+            reason = f"requires external crates: {', '.join(external[:5])}"
+            return False, _make_failure_record(record, reason), reason
+
         wrapped = wrap_for_check(raw_code)
 
         try:
