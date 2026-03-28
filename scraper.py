@@ -481,6 +481,21 @@ _RUSTLANG_REPOS = [
     "async-book",
     "rustlings",      # exercises
     "rust-by-example",
+    "mdBook",         # the book-building tool itself
+    "miri",           # undefined behavior detector
+    "rustup",         # toolchain installer
+    "rust-bindgen",   # C/C++ binding generator
+    "chalk",          # trait solver
+    "log",            # logging facade
+    "libc",           # raw FFI bindings to platform APIs
+    "futures-rs",     # futures/streams/async utilities
+    "hashbrown",      # core HashMap implementation
+    "socket2",        # low-level networking
+    "cc-rs",          # C/C++ build integration
+    "regex",          # official regex engine
+    "crates.io",      # the crates.io web app itself
+    "this-week-in-rust", # skip content but great examples in linked code
+    "api-guidelines", # Rust API design guidelines
 ]
 
 # Curated ecosystem crates — the ones every Rust dev uses
@@ -592,6 +607,72 @@ _ECOSYSTEM_REPOS = [
     ("rust-embedded",    "embedded-hal"),    # embedded systems abstraction
     ("embassy-rs",       "embassy"),         # async embedded framework
     ("smoltcp-rs",       "smoltcp"),         # bare-metal network stack
+    # ── Game engines & graphics ──────────────────────────────────────────────
+    ("bevyengine",       "bevy"),            # ECS game engine — massive, modern Rust
+    ("gfx-rs",           "wgpu"),            # WebGPU implementation
+    ("gfx-rs",           "naga"),            # shader translation
+    # ── Desktop & cross-platform UI ──────────────────────────────────────────
+    ("tauri-apps",       "tauri"),           # desktop app framework
+    ("iced-rs",          "iced"),            # elm-inspired GUI
+    ("slint-ui",         "slint"),           # declarative UI toolkit
+    ("linebender",       "xilem"),           # next-gen reactive UI
+    ("linebender",       "vello"),           # 2D graphics
+    # ── Web frameworks (fullstack / frontend) ────────────────────────────────
+    ("leptos-rs",        "leptos"),          # fullstack reactive web
+    ("DioxusLabs",       "dioxus"),          # cross-platform UI (React-like)
+    ("yewstack",         "yew"),             # Wasm frontend framework
+    ("poem-web",         "poem"),            # web framework
+    ("salvo-rs",         "salvo"),           # web framework
+    ("graphql-rust",     "juniper"),         # GraphQL server
+    ("async-graphql",    "async-graphql"),   # async GraphQL
+    ("SeaQL",            "sea-orm"),         # async ORM
+    ("SeaQL",            "sea-query"),       # query builder
+    # ── Data processing & analytics ──────────────────────────────────────────
+    ("pola-rs",          "polars"),          # fast dataframes — huge, production quality
+    ("apache",           "arrow-rs"),        # Apache Arrow
+    ("apache",           "datafusion"),      # SQL query engine
+    # ── Modern CLI tools (exemplary real-world Rust) ─────────────────────────
+    ("astral-sh",        "ruff"),            # Python linter — fast, well-structured
+    ("astral-sh",        "uv"),              # Python package manager
+    ("nushell",          "nushell"),         # modern shell in Rust
+    ("eza-community",    "eza"),             # modern ls (exa successor)
+    ("prefix-dev",       "pixi"),            # package manager
+    ("lsd-rs",           "lsd"),             # ls deluxe
+    ("Wilfred",          "difftastic"),      # structural diff
+    ("BloopAI",          "bloop"),           # code search
+    # ── Infrastructure & cloud ───────────────────────────────────────────────
+    ("firecracker-microvm","firecracker"),   # AWS microVM
+    ("cloudflare",       "pingora"),         # HTTP proxy framework
+    ("tikv",             "tikv"),            # distributed KV store
+    ("vectordotdev",     "vector"),          # data pipeline (already present but ensuring)
+    ("containers",       "youki"),           # OCI container runtime
+    ("kata-containers",  "kata-containers"), # secure containers
+    # ── Compiler & language tooling ──────────────────────────────────────────
+    ("nickel-lang",      "nickel"),          # configuration language
+    ("typst",            "typst"),           # modern typesetting (LaTeX alternative)
+    ("swc-project",      "swc"),             # fast JS/TS compiler
+    ("denoland",         "deno"),            # JS/TS runtime (Rust core)
+    # ── Async & runtime utilities ────────────────────────────────────────────
+    ("dtolnay",          "async-trait"),     # async in traits (pre-stabilization patterns)
+    ("dtolnay",          "cxx"),             # safe C++ FFI
+    ("tokio-rs",         "console"),         # async debugging tool
+    ("rust-lang",        "futures-rs"),      # futures utilities (also in rust-lang repos)
+    # ── Cryptography & networking (more) ─────────────────────────────────────
+    ("rustls",           "rustls-ffi"),      # C API for rustls
+    ("briansmith",       "ring"),            # crypto primitives
+    ("cloudflare",       "boring"),          # BoringSSL bindings
+    ("libp2p",           "rust-libp2p"),     # peer-to-peer networking
+    # ── Embedded & systems ───────────────────────────────────────────────────
+    ("esp-rs",           "esp-hal"),         # ESP32 HAL
+    ("knurling-rs",      "defmt"),           # embedded logging
+    ("probe-rs",         "probe-rs"),        # embedded debugging
+    # ── Testing & dev tools ──────────────────────────────────────────────────
+    ("nextest-rs",       "nextest"),         # next-gen test runner
+    ("assert-rs",        "predicates-rs"),   # test assertions
+    ("proptest-rs",      "proptest"),        # property-based testing
+    ("la10736",          "rstest"),          # test fixtures
+    ("cargo-bins",       "cargo-binstall"),  # (already present)
+    ("mozilla",          "grcov"),           # code coverage
 ]
 
 def gh_headers_ok(session: requests.Session) -> bool:
@@ -799,6 +880,21 @@ _DOC_SOURCES = [
     ("rust-perf-book",     "https://nnethercote.github.io/perf-book/",           False),
     ("rust-comprehensive", "https://google.github.io/comprehensive-rust/",       False),
     ("rust-cookbook",      "https://rust-lang-nursery.github.io/rust-cookbook/", False),
+    # ── Additional official docs ────────────────────────────────────────────
+    ("rust-rustc",         "https://doc.rust-lang.org/rustc/",                  False),
+    ("rust-rustdoc",       "https://doc.rust-lang.org/rustdoc/",                False),
+    ("rust-unstable-book", "https://doc.rust-lang.org/unstable-book/",          False),
+    ("rust-embedded-book", "https://doc.rust-lang.org/embedded-book/",          False),
+    ("rust-api-guidelines","https://rust-lang.github.io/api-guidelines/",       False),
+    ("rustc-dev-guide",    "https://rustc-dev-guide.rust-lang.org/",            False),
+    ("rust-forge",         "https://forge.rust-lang.org/",                      False),
+    # ── High-quality community resources ────────────────────────────────────
+    ("rust-atomics-locks", "https://marabos.nl/atomics/",                       False),
+    ("rust-cheats",        "https://cheats.rs/",                                True),
+    ("rust-easy",          "https://dhghomon.github.io/easy_rust/",             False),
+    ("rust-cli-book",      "https://rust-cli.github.io/book/",                  False),
+    ("rust-wasm-book",     "https://rustwasm.github.io/docs/book/",             False),
+    ("wasm-bindgen-guide", "https://rustwasm.github.io/docs/wasm-bindgen/",     False),
 ]
 
 # Known chapter/section paths for each book.
