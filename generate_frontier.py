@@ -28,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -1018,6 +1019,9 @@ def run(args: argparse.Namespace) -> None:
 
             # ── Build the output record ───────────────────────────────
             record = {
+                "id":               str(uuid.uuid4()),
+                "schema_variant":   "bug_fix",
+                "source":           "frontier",
                 "category":         cat_name,
                 "difficulty":       example.get("difficulty", cat.get("difficulty", "intermediate")),
                 "prompt":           example["prompt"],
@@ -1034,7 +1038,7 @@ def run(args: argparse.Namespace) -> None:
                     "fmt":           val["fmt"],
                     "clippy":        val["clippy"],
                     "build":         val["build"],
-                    "test":          False,  # not run by default
+                    "test":          False,
                     "clippy_lints":  val["clippy_lints"],
                     "clippy_output": val["clippy_output"],
                 },
