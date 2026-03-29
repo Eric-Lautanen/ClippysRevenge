@@ -1,38 +1,41 @@
 """
 sft.py
 ======
-Supervised fine-tuning (continued pretraining) for the Rust SLM.
+Supervised fine-tuning for the Rust SLM.
 
-Since the SFT corpus uses the same JSONL schema as pretraining, this script
-runs full-sequence language modelling loss (no prompt masking) at a lower
-learning rate on a fresh pass over the data.  This biases the model toward
-the target domain distribution without catastrophic forgetting of pretraining.
+Supports two modes selected automatically from --data_dir contents:
 
-Differences from train.py:
+  MASKED mode  (structured instruction data via prepare_sft_data.py)
+    Expects: sft_train.bin, sft_train_mask.bin, sft_val.bin, sft_val_mask.bin,
+             sft_meta.json
+    Loss is computed only on assistant-turn tokens. Prompt tokens are masked
+    out (target=-1, ignored by cross_entropy). This is proper instruction SFT.
+
+  CONTINUED PRETRAINING mode  (raw corpus — original behaviour)
+    Expects: train.bin, val.bin, meta.json
+    Full-sequence loss at 10× lower LR than pretraining. Use this when your
+    SFT data has no prompt/response structure.
+
+Differences from train.py (both modes):
   - Loads weights from a pretrained checkpoint (--base_ckpt)
-  - Optimizer state is reset (new LR regime — don't carry over Adam moments)
-  - Peak LR 3e-5  (10× lower than pretraining)
-  - Warmup 100 steps  (shorter — weights already converged)
-  - Default 10,000 steps  (≈ 2.6B tokens, ~3 passes over the SFT corpus)
+  - Optimizer state is reset (new LR regime)
+  - Peak LR 3e-5, warmup 100 steps, default 10,000 steps
 
 Usage:
+    # Masked instruction SFT (preferred — use prepare_sft_data.py first)
+    python sft.py \\
+        --data_dir  C:/llm/data/sft_prepared \\
+        --base_ckpt C:/llm/runs/run1/ckpt_best.pt \\
+        --out_dir   C:/llm/runs/sft1
+
+    # Continued pretraining SFT (raw corpus)
     python sft.py \\
         --data_dir  C:/llm/data/prepared \\
         --base_ckpt C:/llm/runs/run1/ckpt_best.pt \\
         --out_dir   C:/llm/runs/sft1
 
-Resume a stopped SFT run:
+Resume:
     python sft.py ... --resume
-
-Key flags:
-    --base_ckpt      Pretrained checkpoint to start from   (required)
-    --micro_batch    Sequences per GPU step                (default: 1)
-    --grad_accum     Accumulation steps                    (default: 256)
-    --max_steps      SFT training steps                    (default: 10000)
-    --peak_lr        Peak learning rate                    (default: 3e-5)
-    --warmup_steps   LR warmup steps                       (default: 100)
-    --val_every      Validate every N steps                (default: 250)
-    --save_every     Save periodic checkpoint every N      (default: 500)
 
 Requirements:
     pip install torch numpy tqdm
@@ -50,7 +53,7 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 import torch
 
-# Reuse all data loading, LR schedule, checkpointing, and eval from train.py
+# Reuse LR schedule, checkpointing, and eval from train.py
 from train import (
     BinaryDataset,
     InfiniteLoader,
@@ -81,6 +84,95 @@ SFT_MIN_LR_RATIO  = 0.1
 SFT_WARMUP_STEPS  = 100
 SFT_VAL_EVERY     = 250
 SFT_SAVE_EVERY    = 500
+
+
+# ---------------------------------------------------------------------------
+# Masked dataset — for structured instruction data from prepare_sft_data.py
+# ---------------------------------------------------------------------------
+
+class MaskedDataset:
+    """
+    Loads sft_{split}.bin + sft_{split}_mask.bin produced by prepare_sft_data.py.
+
+    get_batch() returns (input, target) where target has -1 at prompt positions
+    so cross_entropy ignores them — only assistant tokens contribute to loss.
+    """
+    def __init__(self, tok_path: Path, mask_path: Path, seq_len: int, device: torch.device) -> None:
+        self.seq_len = seq_len
+        self.device  = device
+        self.chunk   = seq_len + 1
+        self.tokens  = np.memmap(str(tok_path),  dtype=np.uint16, mode="r")
+        self.masks   = np.memmap(str(mask_path), dtype=np.uint8,  mode="r")
+        self.n_seq   = len(self.tokens) // self.chunk
+        if self.n_seq == 0:
+            raise ValueError(f"No complete sequences in {tok_path}")
+
+    def __len__(self) -> int:
+        return self.n_seq
+
+    def get_batch(self, indices: list[int]) -> tuple[torch.Tensor, torch.Tensor]:
+        tok_chunks  = [self.tokens[i * self.chunk : (i + 1) * self.chunk] for i in indices]
+        mask_chunks = [self.masks [i * self.chunk : (i + 1) * self.chunk] for i in indices]
+
+        tok_arr  = np.stack(tok_chunks).astype(np.int64)   # (B, seq_len+1)
+        mask_arr = np.stack(mask_chunks)                   # (B, seq_len+1)  uint8
+
+        t    = torch.from_numpy(tok_arr).to(self.device, non_blocking=True)
+        m    = torch.from_numpy(mask_arr).to(self.device, non_blocking=True)
+
+        inp    = t[:, :-1]              # (B, seq_len)
+        target = t[:, 1:].clone()       # (B, seq_len)
+        loss_m = m[:, 1:]               # mask aligned to targets
+
+        # Mask out prompt positions: set to -1 so cross_entropy ignores them
+        target[loss_m == 0] = -1
+        return inp, target
+
+
+class MaskedInfiniteLoader:
+    """Infinite shuffled loader for MaskedDataset."""
+    def __init__(self, dataset: MaskedDataset, micro_batch: int, seed: int = 42) -> None:
+        self.ds          = dataset
+        self.micro_batch = micro_batch
+        self.rng         = np.random.default_rng(seed)
+        self._reset()
+
+    def _reset(self) -> None:
+        self.order = self.rng.permutation(len(self.ds))
+        self.pos   = 0
+
+    def next_batch(self) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.pos + self.micro_batch > len(self.order):
+            self._reset()
+        idx       = self.order[self.pos : self.pos + self.micro_batch].tolist()
+        self.pos += self.micro_batch
+        return self.ds.get_batch(idx)
+
+
+@torch.no_grad()
+def evaluate_masked(
+    model:       RustSLM,
+    val_ds:      MaskedDataset,
+    micro_batch: int,
+    max_batches: int = 20,
+) -> float:
+    """Validation loss over masked sequences (only assistant tokens counted)."""
+    model.eval()
+    rng     = np.random.default_rng(0)
+    indices = rng.permutation(len(val_ds)).tolist()
+    total, n = 0.0, 0
+    for start in range(0, min(len(indices), max_batches * micro_batch), micro_batch):
+        batch_idx = indices[start : start + micro_batch]
+        if not batch_idx:
+            break
+        x, y = val_ds.get_batch(batch_idx)
+        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+            _, loss = model(x, targets=y)
+        if loss is not None:
+            total += loss.item()
+            n     += 1
+    model.train()
+    return total / max(n, 1)
 
 
 # ---------------------------------------------------------------------------
@@ -116,29 +208,53 @@ def sft(
     torch.manual_seed(seed)
 
     # ------------------------------------------------------------------
-    # Meta
+    # Detect mode: masked instruction SFT vs continued pretraining
     # ------------------------------------------------------------------
-    meta_path = data_dir / "meta.json"
-    if not meta_path.exists():
-        raise FileNotFoundError(f"meta.json not found at {meta_path}")
-    with open(meta_path) as f:
-        meta = json.load(f)
+    masked_mode = (data_dir / "sft_meta.json").exists()
+    if masked_mode:
+        print("\nMode: MASKED instruction SFT  (loss on assistant tokens only)")
+        with open(data_dir / "sft_meta.json") as f:
+            meta = json.load(f)
+    else:
+        print("\nMode: CONTINUED PRETRAINING  (full-sequence loss, lower LR)")
+        meta_path = data_dir / "meta.json"
+        if not meta_path.exists():
+            raise FileNotFoundError(
+                f"Neither sft_meta.json nor meta.json found in {data_dir}\n"
+                f"Run prepare_sft_data.py (structured data) or prepare_data.py (raw corpus) first."
+            )
+        with open(meta_path) as f:
+            meta = json.load(f)
 
     vocab_size = meta["vocab_size"]
     seq_len    = meta["seq_len"]
     eos_id     = meta["eos_id"]
-    print(f"\nMeta: vocab={vocab_size:,}  seq_len={seq_len}  eos={eos_id}")
+    print(f"Meta: vocab={vocab_size:,}  seq_len={seq_len}  eos={eos_id}")
 
     # ------------------------------------------------------------------
     # Datasets
     # ------------------------------------------------------------------
-    train_ds = BinaryDataset(data_dir / "train.bin", seq_len, device)
-    val_ds   = BinaryDataset(data_dir / "val.bin",   seq_len, device)
+    if masked_mode:
+        train_ds = MaskedDataset(
+            data_dir / "sft_train.bin", data_dir / "sft_train_mask.bin", seq_len, device
+        )
+        val_ds = MaskedDataset(
+            data_dir / "sft_val.bin", data_dir / "sft_val_mask.bin", seq_len, device
+        )
+        loader     = MaskedInfiniteLoader(train_ds, micro_batch, seed=seed)
+        val_fn     = evaluate_masked
+        loss_label = f"  loss_fraction: {meta.get('train', {}).get('loss_fraction', '?')}"
+    else:
+        train_ds = BinaryDataset(data_dir / "train.bin", seq_len, device)
+        val_ds   = BinaryDataset(data_dir / "val.bin",   seq_len, device)
+        loader   = InfiniteLoader(train_ds, micro_batch, seed=seed)
+        val_fn   = evaluate
+        loss_label = "  (full-sequence loss)"
+
     print(f"Train: {len(train_ds):,} sequences   Val: {len(val_ds):,} sequences")
+    print(loss_label)
 
-    loader   = InfiniteLoader(train_ds, micro_batch, seed=seed)
     eff_batch = micro_batch * grad_accum
-
     print(f"\nBatch config:")
     print(f"  micro_batch  : {micro_batch}")
     print(f"  grad_accum   : {grad_accum}")
@@ -243,7 +359,7 @@ def sft(
             t0           = time.perf_counter()
 
         if (step + 1) % val_every == 0:
-            val_loss  = evaluate(model, val_ds, micro_batch)
+            val_loss  = val_fn(model, val_ds, micro_batch)
             improved  = val_loss < best_val
             marker    = " ★ best" if improved else ""
             print(f"\n  [val] step {step+1:,}  val_loss={val_loss:.4f}{marker}\n")
