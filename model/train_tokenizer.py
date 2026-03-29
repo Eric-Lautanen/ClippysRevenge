@@ -437,18 +437,17 @@ def train_tokenizer(
     #
     # Wired up AFTER training because we need the final token IDs.
     #
-    # IMPORTANT — no spaces in the template:
-    #   CORRECT:   "<|bos|>$A<|eos|>"
-    #   WRONG:     "<|bos|> $A <|eos|>"   ← inserts phantom space tokens into
-    #                                         every sequence; they're not in the
-    #                                         source text and silently corrupt
-    #                                         the round-trip decode test.
+    # IMPORTANT — spaces in the template are REQUIRED syntax.
+    # TemplateProcessing uses spaces as delimiters between pieces in the
+    # template DSL. They are NOT inserted as literal space tokens into the
+    # encoded sequence — the special tokens are added as atomic units.
+    #   "<|bos|> $A <|eos|>"  means: [BOS_ID] + sequence_tokens + [EOS_ID]
     # ------------------------------------------------------------------
     bos_id = tokenizer.token_to_id("<|bos|>")
     eos_id = tokenizer.token_to_id("<|eos|>")
     tokenizer.post_processor = TemplateProcessing(
-        single="<|bos|>$A<|eos|>",
-        pair="<|bos|>$A<|eos|>$B:1<|eos|>:1",
+        single="<|bos|> $A <|eos|>",
+        pair="<|bos|> $A <|eos|> $B:1 <|eos|>:1",
         special_tokens=[
             ("<|bos|>", bos_id),
             ("<|eos|>", eos_id),
