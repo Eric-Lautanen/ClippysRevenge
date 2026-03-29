@@ -1,9 +1,10 @@
 # Generated data — can be gigabytes, never commit
-datasets/
+data/
 rust_data/
 validated/
 cargo_target/
 base_project/
+rocm_env/
 
 # Dedup fingerprint cache
 .hashes/
