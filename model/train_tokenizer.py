@@ -25,6 +25,7 @@ import argparse
 import json
 import re
 import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Generator
 
@@ -133,7 +134,8 @@ def strip_html(text: str) -> str:
     try:
         soup  = BeautifulSoup(text, "html.parser")
         clean = soup.get_text(separator=" ")
-    except Exception:
+    except Exception as exc:
+        warnings.warn(f"strip_html: BeautifulSoup failed ({exc!r}), falling back to regex strip")
         # fallback: crude regex tag strip
         clean = re.sub(r"<[^>]+>", " ", text)
     clean = re.sub(r"\s{3,}", "\n\n", clean)
@@ -178,18 +180,25 @@ def extract_snippet(record: dict) -> str:
         parts.append(wrap_code_blocks(explanation.strip()))
 
     # Validation block — clippy output is gold for a Rust model
+    seen_error_message: str | None = None
     validation = record.get("validation")
     if isinstance(validation, dict):
         for field in ("clippy_output", "error_message"):
             val = validation.get(field)
             if val and isinstance(val, str) and val.strip():
                 parts.append(val.strip())
+                if field == "error_message":
+                    seen_error_message = val.strip()
 
-    # Top-level error fields (older schema variants)
+    # Top-level error fields (older schema variants).
+    # Skip error_message if we already emitted the identical text from validation.
     for field in ("error_message", "error_code"):
         val = record.get(field)
-        if val and isinstance(val, str) and val.strip():
-            parts.append(val.strip())
+        if not (val and isinstance(val, str) and val.strip()):
+            continue
+        if field == "error_message" and val.strip() == seen_error_message:
+            continue
+        parts.append(val.strip())
 
     return "\n\n".join(parts)
 
@@ -268,19 +277,39 @@ def dispatch(record: dict) -> str:
     if source in ("docs", "crates.io", "github") or "content" in record:
         return extract_content(record)
 
-    # Fallback: try 'content' then 'text'
-    for field in ("content", "text"):
-        val = record.get(field)
-        if val and isinstance(val, str) and val.strip():
-            return wrap_code_blocks(strip_html(val.strip()))
+    # Fallback: try 'text' (a record with 'content' would have been caught above)
+    val = record.get("text")
+    if val and isinstance(val, str) and val.strip():
+        return wrap_code_blocks(strip_html(val.strip()))
 
     return ""
 
 
 # ---------------------------------------------------------------------------
+# Extraction statistics — populated by iter_jsonl_files / text_iterator,
+# printed by train_tokenizer after the training loop completes.
+# Separating dispatch_empty from too_short lets you distinguish "schema not
+# recognised at all" failures from "record too small to be useful" skips.
+# ---------------------------------------------------------------------------
+@dataclass
+class ExtractionStats:
+    total:          int = 0   # records seen
+    dispatch_empty: int = 0   # dispatch() returned "" — schema unrecognised
+    too_short:      int = 0   # extracted text was non-empty but < min_chars
+    json_errors:    int = 0   # malformed JSON lines skipped
+
+    @property
+    def usable(self) -> int:
+        return self.total - self.dispatch_empty - self.too_short
+
+
+# ---------------------------------------------------------------------------
 # JSONL reader — streams records without loading all files into RAM
 # ---------------------------------------------------------------------------
-def iter_jsonl_files(data_dir: Path) -> Generator[dict, None, None]:
+def iter_jsonl_files(
+    data_dir: Path,
+    stats: "ExtractionStats",
+) -> Generator[dict, None, None]:
     """Recursively find and stream every .jsonl file under data_dir."""
     files = sorted(data_dir.rglob("*.jsonl"))
     if not files:
@@ -298,71 +327,46 @@ def iter_jsonl_files(data_dir: Path) -> Generator[dict, None, None]:
                 try:
                     yield json.loads(line)
                 except json.JSONDecodeError:
-                    continue  # skip malformed lines silently
+                    stats.json_errors += 1
+                    continue
 
 
 def text_iterator(
     data_dir: Path,
     min_chars: int = DEFAULT_MIN_CHARS,
+    stats: "ExtractionStats | None" = None,
 ) -> Generator[str, None, None]:
     """
     Yields extracted text strings for tokenizer training.
-    Skips records whose extracted text is shorter than min_chars.
-    Prints a summary when the generator is exhausted.
+
+    Populates *stats* (an ExtractionStats instance) with per-category counts
+    so the caller can print a meaningful summary after the iterator is drained.
+    Separates dispatch_empty (unrecognised schema) from too_short (extracted
+    text present but below min_chars) so failures are distinguishable.
     """
-    total = skipped = 0
-    for record in iter_jsonl_files(data_dir):
-        total += 1
+    if stats is None:
+        stats = ExtractionStats()
+    for record in iter_jsonl_files(data_dir, stats):
+        stats.total += 1
         text = dispatch(record)
+        if not text:
+            stats.dispatch_empty += 1
+            continue
         if len(text) < min_chars:
-            skipped += 1
+            stats.too_short += 1
             continue
         yield text
 
-    print(
-        f"\nExtraction complete: {total - skipped:,} usable / {total:,} total records "
-        f"({skipped:,} skipped as too short)"
-    )
-
 
 # ---------------------------------------------------------------------------
-# Tokenizer training
+# Tokenizer construction
 # ---------------------------------------------------------------------------
-def train_tokenizer(
-    data_dir: Path,
-    output_dir: Path,
-    vocab_size: int    = DEFAULT_VOCAB_SIZE,
-    min_frequency: int = DEFAULT_MIN_FREQUENCY,
-    min_chars: int     = DEFAULT_MIN_CHARS,
-) -> None:
+def _build_tokenizer(vocab_size: int, min_frequency: int) -> tuple[Tokenizer, BpeTrainer]:
     """
-    Train a BPE tokenizer and save it in HuggingFace format.
-
-    Parameters
-    ----------
-    data_dir      : directory containing .jsonl training files (searched recursively)
-    output_dir    : where to write tokenizer.json, tokenizer_config.json,
-                    special_tokens_map.json, and vocab.txt
-    vocab_size    : total BPE vocabulary size including special tokens
-    min_frequency : minimum pair frequency required for a BPE merge
-    min_chars     : minimum extracted-text length to include a record
+    Construct and return a configured (but untrained) BPE tokenizer and its
+    trainer.  Separated from training so the setup can be tested independently
+    and re-run without touching the filesystem.
     """
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    print("=" * 60)
-    print("  Rust SLM Tokenizer Trainer")
-    print("=" * 60)
-    print(f"  Data dir      : {data_dir}")
-    print(f"  Output dir    : {output_dir}")
-    print(f"  Vocab size    : {vocab_size:,}")
-    print(f"  Min frequency : {min_frequency}")
-    print(f"  Min chars     : {min_chars}")
-    print(f"  Special tokens: {len(SPECIAL_TOKENS)}")
-    print("=" * 60)
-
-    # ------------------------------------------------------------------
-    # Build the base tokenizer
-    # ------------------------------------------------------------------
     tokenizer = Tokenizer(BPE(unk_token="<|unk|>"))
 
     # NFC normalization — consistent unicode representation across platforms
@@ -428,49 +432,26 @@ def train_tokenizer(
     # ByteLevel decoder correctly reconstructs the original bytes
     tokenizer.decoder = ByteLevelDecoder()
 
-    # ------------------------------------------------------------------
-    # Trainer
-    # ------------------------------------------------------------------
     trainer = BpeTrainer(
         vocab_size=vocab_size,
         special_tokens=SPECIAL_TOKENS,
-        min_frequency=min_frequency,   # passed in — was previously hardcoded
+        min_frequency=min_frequency,
         show_progress=True,
         initial_alphabet=ByteLevel.alphabet(),
     )
 
-    print("\nStreaming training data...")
-    texts = text_iterator(data_dir, min_chars=min_chars)
+    return tokenizer, trainer
 
-    print("Training BPE tokenizer (the tokenizers library is Rust — it's fast!)...")
-    tokenizer.train_from_iterator(texts, trainer=trainer)
 
-    # ------------------------------------------------------------------
-    # Post-processor: wrap every encoded sequence with <|bos|>…<|eos|>.
-    #
-    # Wired up AFTER training because we need the final token IDs.
-    #
-    # IMPORTANT — spaces in the template are REQUIRED syntax.
-    # TemplateProcessing uses spaces as delimiters between pieces in the
-    # template DSL. They are NOT inserted as literal space tokens into the
-    # encoded sequence — the special tokens are added as atomic units.
-    #   "<|bos|> $A <|eos|>"  means: [BOS_ID] + sequence_tokens + [EOS_ID]
-    # ------------------------------------------------------------------
-    bos_id = tokenizer.token_to_id("<|bos|>")
-    eos_id = tokenizer.token_to_id("<|eos|>")
-    tokenizer.post_processor = TemplateProcessing(
-        single="<|bos|> $A <|eos|>",
-        pair="<|bos|> $A <|eos|> $B:1 <|eos|>:1",
-        special_tokens=[
-            ("<|bos|>", bos_id),
-            ("<|eos|>", eos_id),
-        ],
-    )
-
-    # ------------------------------------------------------------------
-    # Save everything AutoTokenizer.from_pretrained() needs
-    # ------------------------------------------------------------------
-
+# ---------------------------------------------------------------------------
+# Saving
+# ---------------------------------------------------------------------------
+def _save_tokenizer(tokenizer: Tokenizer, output_dir: Path, vocab_size: int) -> Path:
+    """
+    Save all files that AutoTokenizer.from_pretrained() expects.
+    Returns the path to tokenizer.json.
+    Separated from training so a save failure can be retried without retraining.
+    """
     # 1. Main tokenizer weights
     tokenizer_path = output_dir / "tokenizer.json"
     tokenizer.save(str(tokenizer_path))
@@ -514,16 +495,28 @@ def train_tokenizer(
     #      grep "unwrap" C:/llm/tokenizer/vocab.txt
     #      grep "tokio"  C:/llm/tokenizer/vocab.txt
     vocab        = tokenizer.get_vocab()
-    vocab_sorted = sorted(vocab.items(), key=lambda x: x[1])
+    vocab_sorted = sorted(vocab.items(), key=lambda kv: kv[1])
     vocab_path   = output_dir / "vocab.txt"
     with open(vocab_path, "w", encoding="utf-8") as f:
         for tok, idx in vocab_sorted:
             f.write(f"{idx}\t{tok}\n")
     print(f"Vocab saved            → {vocab_path}")
 
-    # ------------------------------------------------------------------
-    # Sanity checks
-    # ------------------------------------------------------------------
+    return tokenizer_path
+
+
+# ---------------------------------------------------------------------------
+# Sanity checks
+# ---------------------------------------------------------------------------
+def _run_sanity_checks(tokenizer: Tokenizer, vocab_size: int) -> bool:
+    """
+    Run post-training sanity checks.  Returns True if all checks pass.
+    Separated so it can be called independently on a saved tokenizer.
+    """
+    bos_id = tokenizer.token_to_id("<|bos|>")
+    eos_id = tokenizer.token_to_id("<|eos|>")
+    bos_eos_ids = {bos_id, eos_id}
+
     print("\n" + "=" * 60)
     print("  SANITY CHECKS")
     print("=" * 60)
@@ -566,8 +559,7 @@ def train_tokenizer(
     ]
 
     print("\nRound-trip encode → decode tests:")
-    all_passed  = True
-    bos_eos_ids = {bos_id, eos_id}
+    all_passed = True
     for i, text in enumerate(test_cases):
         encoded   = tokenizer.encode(text)
         # Strip BOS/EOS by ID — the only robust approach
@@ -593,6 +585,7 @@ def train_tokenizer(
         print(f"  {idiom:<42} → {len(content_tokens):>2} token(s): {content_tokens}")
 
     # 4. Vocab stats + corpus-size warning
+    vocab = tokenizer.get_vocab()
     print(f"\nVocabulary stats:")
     print(f"  Final vocab size : {len(vocab):,} / {vocab_size:,}")
     print(f"  Special tokens   : {len(SPECIAL_TOKENS)}")
@@ -604,11 +597,94 @@ def train_tokenizer(
 
     # Final verdict
     print("\n" + "=" * 60)
-    if all_passed and id_ok:
+    passed = all_passed and id_ok
+    if passed:
         print("  All checks PASSED — tokenizer is healthy!")
     else:
         print("  WARNING: One or more checks FAILED — review output above.")
     print("=" * 60)
+
+    return passed
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+def train_tokenizer(
+    data_dir: Path,
+    output_dir: Path,
+    vocab_size: int    = DEFAULT_VOCAB_SIZE,
+    min_frequency: int = DEFAULT_MIN_FREQUENCY,
+    min_chars: int     = DEFAULT_MIN_CHARS,
+) -> None:
+    """
+    Train a BPE tokenizer and save it in HuggingFace format.
+
+    Parameters
+    ----------
+    data_dir      : directory containing .jsonl training files (searched recursively)
+    output_dir    : where to write tokenizer.json, tokenizer_config.json,
+                    special_tokens_map.json, and vocab.txt
+    vocab_size    : total BPE vocabulary size including special tokens
+    min_frequency : minimum pair frequency required for a BPE merge
+    min_chars     : minimum extracted-text length to include a record
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    print("=" * 60)
+    print("  Rust SLM Tokenizer Trainer")
+    print("=" * 60)
+    print(f"  Data dir      : {data_dir}")
+    print(f"  Output dir    : {output_dir}")
+    print(f"  Vocab size    : {vocab_size:,}")
+    print(f"  Min frequency : {min_frequency}")
+    print(f"  Min chars     : {min_chars}")
+    print(f"  Special tokens: {len(SPECIAL_TOKENS)}")
+    print("=" * 60)
+
+    tokenizer, trainer = _build_tokenizer(vocab_size, min_frequency)
+
+    # Stream training data, collecting extraction stats for the summary below.
+    stats = ExtractionStats()
+    print("\nStreaming training data...")
+    texts = text_iterator(data_dir, min_chars=min_chars, stats=stats)
+
+    print("Training BPE tokenizer (the tokenizers library is Rust — it's fast!)...")
+    tokenizer.train_from_iterator(texts, trainer=trainer)
+
+    # Print extraction summary here, after the iterator is fully drained,
+    # so the counts are complete and appear at a predictable point in the log.
+    print(
+        f"\nExtraction complete: {stats.usable:,} usable / {stats.total:,} total records"
+        f"\n  {stats.too_short:,} skipped (too short)"
+        f"\n  {stats.dispatch_empty:,} skipped (schema unrecognised / empty extract)"
+        + (f"\n  !! {stats.json_errors:,} malformed JSON lines skipped" if stats.json_errors else "")
+    )
+
+    # ------------------------------------------------------------------
+    # Post-processor: wrap every encoded sequence with <|bos|>…<|eos|>.
+    #
+    # Wired up AFTER training because we need the final token IDs.
+    #
+    # IMPORTANT — spaces in the template are REQUIRED syntax.
+    # TemplateProcessing uses spaces as delimiters between pieces in the
+    # template DSL. They are NOT inserted as literal space tokens into the
+    # encoded sequence — the special tokens are added as atomic units.
+    #   "<|bos|> $A <|eos|>"  means: [BOS_ID] + sequence_tokens + [EOS_ID]
+    # ------------------------------------------------------------------
+    bos_id = tokenizer.token_to_id("<|bos|>")
+    eos_id = tokenizer.token_to_id("<|eos|>")
+    tokenizer.post_processor = TemplateProcessing(
+        single="<|bos|> $A <|eos|>",
+        pair="<|bos|> $A <|eos|> $B:1 <|eos|>:1",
+        special_tokens=[
+            ("<|bos|>", bos_id),
+            ("<|eos|>", eos_id),
+        ],
+    )
+
+    tokenizer_path = _save_tokenizer(tokenizer, output_dir, vocab_size)
+    _run_sanity_checks(tokenizer, vocab_size)
 
     print(f"\nLoad with tokenizers:")
     print(f"  from tokenizers import Tokenizer")
@@ -616,6 +692,7 @@ def train_tokenizer(
     print(f"\nLoad with HuggingFace transformers:")
     print(f"  from transformers import AutoTokenizer")
     print(f"  tok = AutoTokenizer.from_pretrained(r'{output_dir}')")
+    vocab_path = output_dir / "vocab.txt"
     print(f"\nInspect token merges (Windows):")
     print(f"  findstr unwrap {vocab_path}")
     print(f"\nInspect token merges (Linux/Mac):")
