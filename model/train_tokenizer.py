@@ -379,31 +379,44 @@ def train_tokenizer(
     # and important multi-char operators as atomic units before BPE sees them.
     # ByteLevel then handles unicode safety on whatever remains.
     #
-    # Expected improvement after retraining:
-    #   unwrap_or_else → 1–2 tokens
-    #   tokio::spawn   → 2 tokens
-    #   Result<T, E>   → 3 tokens
+    # Expected token counts after retraining:
+    #   unwrap_or_else → 1 token   (snake_case stays atomic)
+    #   pub async fn   → 3 tokens  (pub / Ġasync / Ġfn — no standalone Ġ)
+    #   tokio::spawn   → 3 tokens  (tokio / :: / spawn)
+    #   Result<T, E>   → 6 tokens  (Result / < / T / , / ĠE / >)
     # ------------------------------------------------------------------
     rust_regex = Regex(
         r"""(?x)
-        r\#[a-zA-Z_][a-zA-Z0-9_]*\#        # raw identifiers: r#async#
-        |[a-zA-Z_][a-zA-Z0-9_]*             # identifiers / keywords (incl. snake_case)
-        |0x[0-9a-fA-F][0-9a-fA-F_]*        # hex literals:    0xFF, 0xDEAD_BEEF
-        |0b[01][01_]*                        # binary literals: 0b1010_1010
-        |0o[0-7][0-7_]*                     # octal literals:  0o777
-        |[0-9][0-9_]*(?:\.[0-9][0-9_]*)?   # decimal / float: 1_000_000, 3.14
-        |::                                  # path separator
-        |->                                  # return type arrow
-        |=>                                  # match arm arrow
-        |\.\.=                               # inclusive range ..=
-        |\.\.                                # exclusive range / struct update ..
-        |<<=|>>=                             # shift-assign
-        |&&=|\|\|=                           # logical-assign
-        |<<|>>                               # bit shift
-        |&&|\|\|                             # logical and / or
-        |[+\-*/%&|^]=                       # op-assign: +=, -=, *=, /=, etc.
-        |[(){}\[\];:,.<>=!?@#~$^&|]        # single-char punctuation
-        |\s+                                 # whitespace kept as a unit
+        # Space-prefixed identifier patterns come FIRST so that a single space
+        # before a word is captured together with it (GPT-2 style: " async" →
+        # one piece → ByteLevel → "Ġasync").  This prevents whitespace from
+        # becoming a standalone "Ġ" token between every pair of keywords.
+        #
+        # Without this:  pub async fn  →  ['pub','Ġ','async','Ġ','fn']  (5 tokens)
+        # With this:     pub async fn  →  ['pub','Ġasync','Ġfn']        (3 tokens)
+        #
+        # Multi-space runs (indentation, blank lines) still fall through to
+        # the \s+ rule at the bottom and become their own whitespace piece.
+        [ ]r\#[a-zA-Z_][a-zA-Z0-9_]*\#     # single space + raw identifier: ' r#async#'
+        |[ ][a-zA-Z_][a-zA-Z0-9_]*           # single space + identifier:     ' unwrap_or_else'
+        |r\#[a-zA-Z_][a-zA-Z0-9_]*\#         # raw identifier (no leading space)
+        |[a-zA-Z_][a-zA-Z0-9_]*              # identifier / keyword (no leading space)
+        |0x[0-9a-fA-F][0-9a-fA-F_]*         # hex literals:    0xFF, 0xDEAD_BEEF
+        |0b[01][01_]*                         # binary literals: 0b1010_1010
+        |0o[0-7][0-7_]*                      # octal literals:  0o777
+        |[0-9][0-9_]*(?:\.[0-9][0-9_]*)?    # decimal / float: 1_000_000, 3.14
+        |::                                   # path separator
+        |->                                   # return type arrow
+        |=>                                   # match arm arrow
+        |\.\.=                                # inclusive range ..=
+        |\.\.                                 # exclusive range / struct update ..
+        |<<=|>>=                              # shift-assign
+        |&&=|\|\|=                            # logical-assign
+        |<<|>>                                # bit shift
+        |&&|\|\|                              # logical and / or
+        |[+\-*/%&|^]=                        # op-assign: +=, -=, *=, /=, etc.
+        |[(){}\[\];:,.<>=!?@#~$^&|]         # single-char punctuation
+        |\s+                                  # remaining whitespace (indentation, newlines)
         """
     )
 
