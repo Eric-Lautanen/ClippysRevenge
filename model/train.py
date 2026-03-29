@@ -51,6 +51,8 @@ from tqdm import tqdm
 
 # Enable experimental ROCm attention kernels before importing model
 os.environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
+# Reduce fragmentation on the unified 6 GB iGPU heap
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 from model import RustSLM, ModelConfig, count_parameters
 
@@ -58,8 +60,8 @@ from model import RustSLM, ModelConfig, count_parameters
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
-DEFAULT_MICRO_BATCH   = 2
-DEFAULT_GRAD_ACCUM    = 128      # effective batch = micro_batch × grad_accum = 256
+DEFAULT_MICRO_BATCH   = 1
+DEFAULT_GRAD_ACCUM    = 256      # effective batch = micro_batch × grad_accum = 256
 DEFAULT_MAX_STEPS     = 160_000  # ≈ 1 epoch over 160,779 sequences at eff. batch 256
 DEFAULT_PEAK_LR       = 3e-4
 DEFAULT_MIN_LR_RATIO  = 0.1      # min_lr = peak_lr × this
