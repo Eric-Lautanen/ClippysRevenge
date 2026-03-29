@@ -5,6 +5,7 @@ validated/
 cargo_target/
 base_project/
 rocm_env/
+runs/
 
 # Dedup fingerprint cache
 .hashes/
