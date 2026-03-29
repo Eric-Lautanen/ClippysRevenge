@@ -128,16 +128,31 @@ _CODE_FENCE_RE = re.compile(
 # HTML stripper — handles noisy doc scrapes like the async-book
 # ---------------------------------------------------------------------------
 def strip_html(text: str) -> str:
-    """Remove HTML tags and collapse excessive whitespace."""
+    """Remove HTML tags and collapse excessive whitespace.
+
+    Parser cascade:
+      1. html.parser  — fast, pure-Python, handles most well-formed HTML/XML.
+      2. lxml         — tolerates malformed CDATA sections (e.g. '<![CDATA[...]]>')
+                        that html.parser rejects with ParserRejectedMarkup.
+      3. regex strip  — last resort; structurally blind but never raises.
+    """
     if "<" not in text:
         return text
     try:
         soup  = BeautifulSoup(text, "html.parser")
         clean = soup.get_text(separator=" ")
-    except Exception as exc:
-        warnings.warn(f"strip_html: BeautifulSoup failed ({exc!r}), falling back to regex strip")
-        # fallback: crude regex tag strip
-        clean = re.sub(r"<[^>]+>", " ", text)
+    except Exception:
+        # html.parser rejected the markup (commonly malformed CDATA).
+        # lxml handles these gracefully — try it before falling back to regex.
+        try:
+            soup  = BeautifulSoup(text, "lxml")
+            clean = soup.get_text(separator=" ")
+        except Exception as exc:
+            warnings.warn(
+                f"strip_html: both html.parser and lxml failed ({exc!r}), "
+                "falling back to regex strip"
+            )
+            clean = re.sub(r"<[^>]+>", " ", text)
     clean = re.sub(r"\s{3,}", "\n\n", clean)
     return clean.strip()
 
