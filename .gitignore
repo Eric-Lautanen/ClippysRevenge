@@ -1,5 +1,6 @@
 # Generated data — can be gigabytes, never commit
 data/
+backup/
 rust_data/
 validated/
 cargo_target/
