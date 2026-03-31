@@ -186,14 +186,27 @@ If you cannot think of a working fix, choose a different bug.
 
 ── BROKEN CODE RULES BY ERROR TYPE ───────────────────────────────────
 compile-error  → broken_code MUST fail to compile with the exact stated error.
-                 Only use this type if you are certain the bug causes a compiler error.
-                 If unsure, use logic-bug or design-issue instead.
+                 ONLY use this type for bugs you are 100% certain cause a compiler error.
+                 Prefer errors that are trivially reproducible in <30 lines of stdlib code:
+                   Ownership/moves:  E0382, E0505, E0507, E0509
+                   Borrow checker:   E0499, E0502, E0506, E0596
+                   Lifetimes:        E0106, E0597, E0515, E0716
+                   Type/traits:      E0277, E0308, E0282, E0369, E0004
+                   Async:            E0277 (Send), E0733
+                   Scope/imports:    E0412, E0425
+                 If unsure whether the code actually fails, use logic-bug or design-issue instead.
 runtime-panic  → broken_code MUST compile but panic at runtime (e.g. index out of bounds, unwrap on None).
 logic-bug      → broken_code MUST compile and run, but produce wrong output. fixed_code corrects the logic.
 design-issue   → broken_code MUST compile and run correctly, but is unidiomatic, unsafe, or fragile. fixed_code improves it."""
 
-# Persona prefixes rotated across attempts to encourage output diversity.
-# Each is a short framing sentence prepended to the user prompt.
+import random as _random
+
+# ── Prompt variation pools ────────────────────────────────────────────────────
+# These are randomly sampled (seeded by attempt + category) so every call to
+# build_user_prompt produces a structurally different prompt.  The old approach
+# cycled personas in fixed order by attempt number, meaning attempt 9 was
+# identical to attempt 1.
+
 _PERSONAS: list[str] = [
     "You are a senior Rust engineer reviewing a tricky bug reported by a colleague.",
     "You are a Rust educator writing examples for an intermediate-level workshop.",
@@ -203,11 +216,132 @@ _PERSONAS: list[str] = [
     "You are a technical writer crafting a debugging guide for common Rust pitfalls.",
     "You are a compiler engineer illustrating how the borrow checker enforces ownership rules.",
     "You are a developer porting C++ code to Rust and encountered this ownership issue.",
+    "You are a developer migrating a Python service to Rust and hit this issue.",
+    "You are a game developer learning Rust for performance-critical engine code.",
+    "You are a backend engineer who found this pattern in a code audit.",
+    "You are an interviewer preparing a realistic Rust coding challenge.",
+]
+
+# Angles push the model toward structurally different bugs each generation.
+# Compile-error angles name the specific Rust error code so the model has an
+# unambiguous target to reproduce.  Each entry includes the error code, the
+# canonical compiler message, and a one-sentence recipe so small models have
+# the least ambiguity possible about what to generate.
+#
+# Selection criteria: only errors that are (a) trivially reproducible in <30
+# lines of pure stdlib code and (b) have a clear, deterministic fix.  Errors
+# that require complex trait machinery or nightly features are excluded.
+_COMPILE_ERROR_ANGLES: list[str] = [
+    # ── Ownership & moves ────────────────────────────────────────────────────
+    "compile-error E0382: use of moved value — move a value into a function or binding, then try to use the original variable afterward.",
+    "compile-error E0505: cannot move out of a variable because it is borrowed — hold a live borrow of a value, then try to move or drop it.",
+    "compile-error E0507: cannot move out of a shared reference — try to move a field or value out of a &T reference.",
+    "compile-error E0509: cannot move out of type which implements the Drop trait — try to move a field out of a struct that implements Drop.",
+    # ── Borrow checker ───────────────────────────────────────────────────────
+    "compile-error E0499: cannot borrow as mutable more than once at a time — create two simultaneous &mut references to the same value.",
+    "compile-error E0502: cannot borrow as mutable because it is also borrowed as immutable — hold a & borrow then try to take a &mut borrow.",
+    "compile-error E0506: cannot assign to a variable because it is borrowed — assign to a variable while a reference to it is still live.",
+    "compile-error E0596: cannot borrow as mutable, as it is not declared as mutable — call a &mut method or take &mut on a variable declared without mut.",
+    # ── Lifetimes ────────────────────────────────────────────────────────────
+    "compile-error E0106: missing lifetime specifier — define a struct or function that holds a reference without the required lifetime annotation.",
+    "compile-error E0597: value does not live long enough — return or store a reference to a local variable that is dropped before the reference is used.",
+    "compile-error E0515: cannot return reference to local data — return a reference to data owned by the current function.",
+    "compile-error E0716: temporary value dropped while borrowed — take a reference to a temporary expression; the temporary is dropped at the end of the statement.",
+    "compile-error E0521: borrowed data escapes outside of a closure — a closure returns or stores a reference to data from its enclosing scope in a way that outlives the borrow.",
+    # ── Type system & traits ─────────────────────────────────────────────────
+    "compile-error E0277: trait bound not satisfied — pass a type to a generic function that requires a trait the type does not implement (e.g. missing Clone, Display, or Send).",
+    "compile-error E0308: type mismatch — return or assign a value of the wrong type where the expected type is unambiguous (e.g. returning i32 where &str is expected).",
+    "compile-error E0282: type annotations needed — write an expression where the compiler cannot infer the type without an explicit annotation.",
+    "compile-error E0369: binary operation cannot be applied — use +, -, ==, or < on a custom type that does not implement the corresponding std trait (Add, PartialEq, PartialOrd).",
+    "compile-error E0004: non-exhaustive patterns in match — write a match expression that is missing one or more variants of an enum.",
+    "compile-error E0207: type parameter is not constrained by the impl — add a type parameter to an impl block that does not appear in the implementing type or trait.",
+    # ── Async ────────────────────────────────────────────────────────────────
+    "compile-error E0277 (Send bound): spawn a future on tokio::spawn that holds a non-Send value (e.g. Rc or a raw pointer) across an await point.",
+    "compile-error E0728: thread-local cannot be used in an async fn — access a thread_local! variable across an await point inside an async function.",
+    "compile-error E0733: recursion in an async fn requires boxing — write a directly recursive async fn without boxing the return type.",
+    # ── Imports & scope ──────────────────────────────────────────────────────
+    "compile-error E0412: cannot find type in this scope — use a type name without the required use statement or without the correct module path.",
+    "compile-error E0425: cannot find value in this scope — call a function or reference a variable that has not been imported or defined.",
+]
+
+_OTHER_ERROR_ANGLES: list[str] = [
+    # ── Runtime panics ───────────────────────────────────────────────────────
+    "runtime-panic from an out-of-bounds Vec index or slice access — index a collection with a value that can exceed its length.",
+    "runtime-panic from unwrap() on a None Option — call unwrap() on an Option that is None at runtime.",
+    "runtime-panic from unwrap() on an Err Result — call unwrap() on a Result that holds an error at runtime.",
+    "runtime-panic from integer overflow in a debug build — perform arithmetic that overflows for certain inputs.",
+    "runtime-panic from a divide-by-zero — divide an integer by a value that is zero at runtime.",
+    "runtime-panic from a stack overflow due to unbounded recursion — call a recursive function without a correct base case.",
+    # ── Logic bugs ───────────────────────────────────────────────────────────
+    "logic-bug with off-by-one error — loop bounds or index arithmetic is wrong by one, producing an incorrect result.",
+    "logic-bug involving an iterator adapter used incorrectly — e.g. map used where flat_map is needed, or take/skip used with wrong count.",
+    "logic-bug in error handling — an error is silently discarded with let _ = or by calling .ok(), hiding a real failure.",
+    "logic-bug from integer truncation — a value is cast from a wider to a narrower integer type, silently losing precision.",
+    "logic-bug from wrong operator precedence or short-circuit evaluation — logical expression evaluates differently than the author intended.",
+    "logic-bug in string or byte processing — incorrect use of chars() vs bytes(), or wrong index into a UTF-8 string.",
+    # ── Design issues ────────────────────────────────────────────────────────
+    "design-issue — unnecessary .clone() on every loop iteration that should instead borrow or use a reference.",
+    "design-issue — using .unwrap() throughout production code instead of propagating errors with ? and a proper Result return type.",
+    "design-issue — a Vec<T> is rebuilt from scratch on every call when it should be built once and reused.",
+    "design-issue — shared mutable state uses a raw Mutex<T> without Arc, or uses Arc<T> without Mutex when mutation is needed.",
+    "design-issue — a function takes ownership of a value (String, Vec) when it only needs to read it and should take a &str or &[T] instead.",
+    "design-issue — an enum or match arm uses a catch-all _ branch too broadly, silently ignoring new variants.",
+]
+
+# Combined pool — compile-error entries appear twice so they are sampled at
+# roughly 2:1 vs other types.  This reflects their higher training value and
+# the extra prompting they need to be generated correctly.
+_ERROR_ANGLES: list[str] = _COMPILE_ERROR_ANGLES * 2 + _OTHER_ERROR_ANGLES
+
+# Code shape hints force structural variety in the generated examples.
+_CODE_SHAPES: list[str] = [
+    "Use a struct with multiple fields to demonstrate the issue.",
+    "Show the bug inside an iterator chain or closure.",
+    "Use a function that takes and returns references.",
+    "Demonstrate the issue across two separate functions.",
+    "Use a Vec or HashMap as the primary data structure.",
+    "Show the bug inside an async fn with await points.",
+    "Use an enum with multiple variants to drive the logic.",
+    "Use a trait implementation to surface the problem.",
+    "Show the bug inside a loop or recursive function.",
+    "Use a nested struct or enum to expose the issue.",
+    "Show the bug in a generic function with type parameters.",
+    "Demonstrate the issue in a multi-threaded context using threads or channels.",
+]
+
+# Varied phrasings for the final instruction line.
+_REQUEST_PHRASINGS: list[str] = [
+    "Generate ONE realistic broken \u2192 fixed example in the required JSON format.",
+    "Produce ONE concrete broken \u2192 fixed pair in the required JSON format.",
+    "Write ONE authentic broken \u2192 fixed example following the JSON schema exactly.",
+    "Create ONE realistic example with a genuine bug and its correct fix, as JSON.",
+    "Output ONE broken \u2192 fixed training example in the required JSON format.",
 ]
 
 
-def build_user_prompt(cat: dict, attempt: int = 1) -> str:
-    persona = _PERSONAS[(attempt - 1) % len(_PERSONAS)]
+def build_user_prompt(
+    cat: dict,
+    attempt: int = 1,
+    correction_hint: str = "",
+) -> str:
+    """
+    Build a varied user prompt for the given category + attempt number.
+
+    correction_hint — when a previous attempt produced broken_code that
+    compiled cleanly (broken-compiles failure), pass a short description of
+    what went wrong so the model can avoid repeating the same mistake.
+    """
+    # Seed with attempt + a stable hash of the category name so that:
+    #  - Every (category, attempt) pair produces a unique prompt combination.
+    #  - Retries on the same category never repeat the same prompt.
+    #  - The sequence is reproducible for debugging.
+    rng = _random.Random(attempt * 9973 + (hash(cat.get("category", "")) & 0xFFFFFFFF))
+
+    persona      = rng.choice(_PERSONAS)
+    error_angle  = rng.choice(_ERROR_ANGLES)
+    code_shape   = rng.choice(_CODE_SHAPES)
+    request_line = rng.choice(_REQUEST_PHRASINGS)
+
     parts = [
         persona,
         f'Category: "{cat["category"]}"',
@@ -217,7 +351,19 @@ def build_user_prompt(cat: dict, attempt: int = 1) -> str:
     tags = cat.get("tags", [])
     if tags:
         parts.append(f'Tags: {", ".join(tags)}')
-    parts.append("\nGenerate ONE realistic broken → fixed example in the required JSON format.")
+
+    parts.append(f'Error angle: {error_angle}')
+    parts.append(f'Code shape:  {code_shape}')
+
+    if correction_hint:
+        parts.append(f'\nIMPORTANT — previous attempt failed: {correction_hint}')
+        parts.append(
+            "Do NOT repeat that mistake. "
+            "If you cannot produce broken_code that genuinely fails to compile, "
+            "switch to error_code \"logic-bug\" or \"design-issue\" instead."
+        )
+
+    parts.append(f'\n{request_line}')
     return "\n".join(parts)
 
 
@@ -1559,6 +1705,12 @@ def run(args: argparse.Namespace) -> None:
         generated_this_cat = 0
         attempt = 0
         consecutive_failures = 0
+        # broken-compiles failures are tracked separately — they don't count
+        # toward the shared MAX_FAILURES limit because they are a model quality
+        # issue (hallucinated error), not a structural problem with the category.
+        broken_compiles_streak = 0
+        _MAX_BROKEN_COMPILES    = 4   # give up on compile-error after this many
+        correction_hint         = ""  # fed back into the next prompt on bc failure
 
         while generated_this_cat < remaining:
             attempt += 1
@@ -1582,7 +1734,8 @@ def run(args: argparse.Namespace) -> None:
                 return False
 
             # ── LLM call ─────────────────────────────────────────────
-            user_prompt = build_user_prompt(cat, attempt=attempt)
+            user_prompt = build_user_prompt(cat, attempt=attempt, correction_hint=correction_hint)
+            correction_hint = ""  # reset — only used for one follow-up attempt
             raw = call_llm(model, user_prompt)
             if raw is None:
                 _fail("llm-error")
@@ -1618,15 +1771,30 @@ def run(args: argparse.Namespace) -> None:
             # to compile.  If it passes, the model hallucinated the error —
             # reject cheaply before spending cargo time on fixed_code.
             if example.get("error_code") == "compile-error":
-                if check_broken_compiles(broken_code, example.get("crates", [])):
+                bc_result = check_broken_compiles(broken_code, example.get("crates", []))
+                if bc_result is True:
                     console.print(
                         f"  [warn]broken_code compiles cleanly (attempt {attempt}) "
                         f"[broken-compiles][/warn]"
                     )
                     log_parse_failure(cat_name, attempt, model,
                                       raw, reason="broken-compiles")
-                    _fail("broken-compiles")
-                    if _bail_if_stuck(): break
+                    broken_compiles_streak += 1
+                    total_fail += 1
+                    # Build a correction hint so the next prompt knows what went wrong.
+                    stated_error = example.get("error_message", "").strip()
+                    correction_hint = (
+                        f"broken_code compiled without errors — the stated error "
+                        f"({stated_error!r}) did not actually occur. "
+                        "Choose a different, simpler bug that is guaranteed to fail compilation, "
+                        "or switch to error_code \"logic-bug\" instead."
+                    )
+                    if broken_compiles_streak >= _MAX_BROKEN_COMPILES:
+                        console.print(
+                            f"  [warn]{_MAX_BROKEN_COMPILES} broken-compiles in a row — "
+                            f"skipping category.[/warn]"
+                        )
+                        break
                     continue
 
             # ── Cargo validation ──────────────────────────────────────
@@ -1691,8 +1859,10 @@ def run(args: argparse.Namespace) -> None:
             write_example(out_path, record)
             save_hash(output_dir, cat_name, h)
             known_hashes.add(h)
-            generated_this_cat += 1
-            total_ok           += 1
+            generated_this_cat  += 1
+            total_ok            += 1
+            broken_compiles_streak = 0  # reset on any successful generation
+            consecutive_failures   = 0  # successful example clears the streak
             # ── Cooldown ──────────────────────────────────────────────
             if cooldown_every > 0 and total_ok % cooldown_every == 0:
                 console.print(
