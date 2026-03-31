@@ -1,5 +1,5 @@
 # Generated data — can be gigabytes, never commit
-data/
+data/prepared/
 backup/
 rust_data/
 validated/
