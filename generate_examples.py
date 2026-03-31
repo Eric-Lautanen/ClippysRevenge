@@ -1538,7 +1538,8 @@ def run(args: argparse.Namespace) -> None:
             record = {
                 "id":               str(uuid.uuid4()),
                 "schema_variant":   "bug_fix",
-                "source":           "frontier",
+                "source":           "opensource",
+                "category_id":      cat["id"],
                 "category":         cat_name,
                 "difficulty":       example.get("difficulty", cat.get("difficulty", "intermediate")),
                 "prompt":           example["prompt"],
