@@ -176,7 +176,7 @@ Rules:
 - Only use stdlib APIs you are certain exist. Verify method names (e.g. VecDeque uses push_back, not push).
 - Vec, String, Option, Result are in the prelude — never import them with use.
 - If a function is generic over T, do not push or return concrete literals of a specific type.
-- Never use # or # —let warnings stay. Broken code must fail for real reasons, not suppressed noise."""
+- Never use #![allow(...)] or #[allow(...)] attributes in any code field — warnings must be resolved properly, not suppressed."""
 
 def build_user_prompt(cat: dict) -> str:
     parts = [
@@ -1034,6 +1034,7 @@ _TOP_LEVEL   = re.compile(
 
 
 _PYTHON_COMMENT  = re.compile(r"^#(?!\[)\s.*$", re.MULTILINE)
+_ALLOW_ATTR      = re.compile(r"^[ \t]*#!\[allow\([^\)]*\)\][ \t]*\n?", re.MULTILINE)
 _MISSING_DEBUG   = re.compile(r"E0277|doesn't implement `Debug`")
 _STRUCT_ENUM_DEF = re.compile(r"^(\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum)\s)", re.MULTILINE)
 
@@ -1522,7 +1523,7 @@ def run(args: argparse.Namespace) -> None:
                     break
                 continue
 
-            fixed_code = _PYTHON_COMMENT.sub("", example.get("fixed_code", "")).strip()
+            fixed_code = _ALLOW_ATTR.sub("", _PYTHON_COMMENT.sub("", example.get("fixed_code", ""))).strip()
             if not fixed_code:
                 console.print(f"  [warn]Empty fixed_code (attempt {attempt})[/warn]")
                 _fail("empty-fixed-code")
@@ -1536,7 +1537,7 @@ def run(args: argparse.Namespace) -> None:
             # to compile.  If it passes, the model hallucinated the error —
             # reject cheaply before spending cargo time on fixed_code.
             if example.get("error_code") == "compile-error":
-                broken_code = _PYTHON_COMMENT.sub("", example.get("broken_code", "")).strip()
+                broken_code = _ALLOW_ATTR.sub("", _PYTHON_COMMENT.sub("", example.get("broken_code", ""))).strip()
                 if broken_code and check_broken_compiles(broken_code, example.get("crates", [])):
                     console.print(
                         f"  [warn]broken_code compiles cleanly (attempt {attempt}) "
