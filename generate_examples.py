@@ -591,6 +591,7 @@ def call_llm(model_id: str, user_prompt: str) -> Optional[str]:
         "temperature": TEMPERATURE,
         "max_tokens":  MAX_TOKENS,
         "stream":      True,
+        "reasoning":   {"effort": "none"}, 
     }
     output: list[str] = []
     think_buf = ""
