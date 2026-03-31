@@ -1255,7 +1255,7 @@ def validate(fixed_code: str, declared_crates: list[str]) -> dict:
 
         # ── cargo clippy ─────────────────────────────────────────────
         r = _run(
-            ["cargo", "clippy", "--quiet", "--color=never",
+            ["cargo", "clippy", "--color=never",
              "--", "-D", "warnings"],
             proj,
             env=cargo_env,
@@ -1263,14 +1263,17 @@ def validate(fixed_code: str, declared_crates: list[str]) -> dict:
         result["clippy"] = (r.returncode == 0)
         # Collect all lint names from clippy/rustc output.
         # Matches both [clippy::lint_name] and plain rustc lints like [unused_mut].
+        # NOTE: --quiet is intentionally absent — it suppresses warning output
+        # even when the build fails due to -D warnings, leaving clippy_lints empty.
         if not result["clippy"]:
             lints: list[str] = []
-            for line in r.stderr.splitlines():
+            combined = r.stderr + "\n" + r.stdout
+            for line in combined.splitlines():
                 m = re.search(r"\[([a-z_:]+)\]", line)
                 if m and m.group(1) not in ("E", "W"):
                     lints.append(m.group(1))
             result["clippy_lints"]  = sorted(set(lints))
-            result["clippy_output"] = r.stderr.strip()
+            result["clippy_output"] = (r.stderr + r.stdout).strip()
 
         # ── MSRV: pattern-based detection (edition 2021 baseline = 1.56) ──
         result["min_rust_version"] = _detect_msrv(wrapped)
@@ -1316,7 +1319,6 @@ def check_broken_compiles(broken_code: str, declared_crates: list[str]) -> bool:
 _SCRIPT_DIR     = Path(__file__).resolve().parent
 _CARGO_FAIL_LOG  = _SCRIPT_DIR / "frontier_cargo_failures.log"
 _PARSE_FAIL_LOG  = _SCRIPT_DIR / "frontier_parse_failures.log"
-_CLIPPY_FAIL_LOG = _SCRIPT_DIR / "frontier_clippy_failures.log"
 _SEP = "═" * 72
 
 
@@ -1353,23 +1355,6 @@ def log_cargo_failure(
             f.write(err)
             if not err.endswith("\n"):
                 f.write("\n")
-        f.write(f"{_SEP} END {_SEP}\n")
-
-
-def log_clippy_failure(
-    cat_name: str, attempt: int, model: str, lints: list[str], fixed_code: str
-) -> None:
-    """Append a clippy warning record to frontier_clippy_failures.log."""
-    import datetime
-    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(_CLIPPY_FAIL_LOG, "a", encoding="utf-8") as f:
-        f.write(f"\n{_SEP}\n")
-        f.write(f"  {ts}  cat={cat_name!r}  attempt={attempt}  model={model}\n")
-        f.write(f"  lints: {', '.join(lints) if lints else 'unspecified'}\n")
-        f.write(f"{_SEP}\n")
-        f.write(fixed_code)
-        if not fixed_code.endswith("\n"):
-            f.write("\n")
         f.write(f"{_SEP} END {_SEP}\n")
 
 
@@ -1694,12 +1679,6 @@ def run(args: argparse.Namespace) -> None:
                 "has_unsafe":        val["has_unsafe"],
                 "license":           LICENSE,
             }
-
-            if not val["clippy"]:
-                log_clippy_failure(
-                    cat_name, attempt, model,
-                    val["clippy_lints"], fixed_code,
-                )
 
             # ── Deduplication check ───────────────────────────────────
             h = example_hash(record)
