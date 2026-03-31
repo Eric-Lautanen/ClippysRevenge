@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -81,13 +82,14 @@ signal.signal(signal.SIGINT, _handle_sigint)
 LM_BASE      = "http://localhost:1234"
 API_OAI      = f"{LM_BASE}/v1"
 API_V1       = f"{LM_BASE}/api/v1"
-TEMPERATURE  = 0.2
+TEMPERATURE  = 0.5
 MAX_TOKENS   = 8192
 REQ_TIMEOUT  = 240
 CTX_LENGTH   = 8192
 LOAD_TIMEOUT = 120
 EDITION      = "2021"
 LICENSE      = "Apache-2.0"
+MAX_FAILURES = 2          # skip a category after this many total failed attempts
 SHARED_TARGET_DIR = Path(__file__).parent / "cargo_target"  # shared build cache
 
 # ─────────────────────────────────────────────────────────
@@ -152,34 +154,62 @@ CRATE_MAP: dict[str, str] = {
 # ─────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
-Rust expert generating training data. Output ONE raw JSON object — no fences, no prose, nothing else.
+You are a Rust expert generating training data. Output ONE raw JSON object. No markdown fences, no explanation, no text before or after — just the JSON object.
 
+── OUTPUT FORMAT ────────────────────────────────────────────────────
 {
-  "category": "<as given>",
-  "difficulty": "<beginner|intermediate|advanced>",
-  "prompt": "<1-3 sentence developer question about the bug>",
-  "broken_code": "<complete Rust file — fn main + all use stmts — that FAILS to compile>",
-  "error_message": "<exact compiler error or runtime behaviour>",
-  "error_code": "<compile-error|logic-bug|design-issue|runtime-panic>",
-  "fixed_code": "<complete, idiomatic Rust file that compiles and passes clippy>",
-  "explanation": "<2-4 sentences: root cause and what the fix does>",
-  "concepts": ["<tag>"],
+  "category": "Core - Ownership",
+  "difficulty": "intermediate",
+  "prompt": "Why does this code fail to compile? The value seems to still be in scope.",
+  "broken_code": "fn main() {\\n    let s = String::from(\\"hello\\");\\n    let r = &s;\\n    drop(s);\\n    println!(\\"{}\\", r);\\n}",
+  "error_message": "error[E0505]: cannot move out of `s` because it is borrowed",
+  "error_code": "compile-error",
+  "fixed_code": "fn main() {\\n    let s = String::from(\\"hello\\");\\n    let r = &s;\\n    println!(\\"{}\\", r);\\n}",
+  "explanation": "Calling drop(s) moves s while r still holds a borrow of it. Removing the drop allows r to be used safely before s is freed at end of scope.",
+  "concepts": ["ownership", "borrowing", "drop"],
   "crates": []
 }
 
-Rules:
-- Both code fields must be complete Rust files (fn main or async fn main, all use stmts), edition 2021.
-- broken_code MUST fail to compile with the stated error — not a trivial typo.
-- fixed_code MUST differ from broken_code semantically, not just whitespace or comments.
-- No external crates. crates is always [].
-- Never use placeholder or stub function bodies — every function must have a real, compilable implementation.
-- Only use stdlib APIs you are certain exist. Verify method names (e.g. VecDeque uses push_back, not push).
-- Vec, String, Option, Result are in the prelude — never import them with use.
-- If a function is generic over T, do not push or return concrete literals of a specific type.
-- Never use #![allow(...)] or #[allow(...)] attributes in any code field — warnings must be resolved properly, not suppressed."""
+── CODE RULES ───────────────────────────────────────────────────────────
+- Both fields must be complete Rust files, edition 2021, with fn main (or async fn main) and all use statements.
+- No external crates — crates is always [].
+- Never use #![allow(...)] or #[allow(...)] — fix warnings properly.
+- Only use stdlib APIs you are certain exist (e.g. VecDeque::push_back not push).
+- Vec, String, Option, Result are in the prelude — do not import them.
+- Never use stub or placeholder bodies — every function must have a real implementation.
 
-def build_user_prompt(cat: dict) -> str:
+── THE MOST IMPORTANT RULE ────────────────────────────────────────────
+broken_code and fixed_code MUST be different in a meaningful way.
+Do NOT copy the same code into both fields.
+fixed_code must contain the actual change that solves the problem.
+If you cannot think of a working fix, choose a different bug.
+
+── BROKEN CODE RULES BY ERROR TYPE ───────────────────────────────────
+compile-error  → broken_code MUST fail to compile with the exact stated error.
+                 Only use this type if you are certain the bug causes a compiler error.
+                 If unsure, use logic-bug or design-issue instead.
+runtime-panic  → broken_code MUST compile but panic at runtime (e.g. index out of bounds, unwrap on None).
+logic-bug      → broken_code MUST compile and run, but produce wrong output. fixed_code corrects the logic.
+design-issue   → broken_code MUST compile and run correctly, but is unidiomatic, unsafe, or fragile. fixed_code improves it."""
+
+# Persona prefixes rotated across attempts to encourage output diversity.
+# Each is a short framing sentence prepended to the user prompt.
+_PERSONAS: list[str] = [
+    "You are a senior Rust engineer reviewing a tricky bug reported by a colleague.",
+    "You are a Rust educator writing examples for an intermediate-level workshop.",
+    "You are a systems programmer who just hit this bug in production and needs a minimal repro.",
+    "You are a code reviewer who caught this mistake during a pull request review.",
+    "You are a Rust newcomer who wrote this code and is puzzled by the compiler error.",
+    "You are a technical writer crafting a debugging guide for common Rust pitfalls.",
+    "You are a compiler engineer illustrating how the borrow checker enforces ownership rules.",
+    "You are a developer porting C++ code to Rust and encountered this ownership issue.",
+]
+
+
+def build_user_prompt(cat: dict, attempt: int = 1) -> str:
+    persona = _PERSONAS[(attempt - 1) % len(_PERSONAS)]
     parts = [
+        persona,
         f'Category: "{cat["category"]}"',
         f'Focus: {cat.get("prompt_focus", cat.get("description", ""))}',
         f'Difficulty: {cat["difficulty"]}',
@@ -885,10 +915,12 @@ _COLLAPSE_WS         = re.compile(r"\s+")
 def _normalize_code(code: str) -> str:
     """
     Normalise a Rust snippet for fuzzy equality comparison.
-    Strips // and /* */ comments, then collapses all whitespace runs to a
-    single space.  Used to catch "no-fix" cases where the model only made
-    cosmetic (whitespace / comment) changes between broken_code and fixed_code.
+    Strips allow attributes, // and /* */ comments, then collapses all
+    whitespace runs to a single space.  Used to catch "no-fix" cases where
+    the model only made cosmetic (whitespace / comment / allow-attr) changes
+    between broken_code and fixed_code.
     """
+    code = _ALLOW_ATTR.sub("", code)
     code = _STRIP_LINE_COMMENT.sub("", code)
     code = _STRIP_BLOCK_COMMENT.sub("", code)
     return _COLLAPSE_WS.sub(" ", code).strip()
@@ -1034,7 +1066,7 @@ _TOP_LEVEL   = re.compile(
 
 
 _PYTHON_COMMENT  = re.compile(r"^#(?!\[)\s.*$", re.MULTILINE)
-_ALLOW_ATTR      = re.compile(r"^[ \t]*#!\[allow\([^\)]*\)\][ \t]*\n?", re.MULTILINE)
+_ALLOW_ATTR      = re.compile(r"^[ \t]*#!?\[allow\([^\)]*\)\][ \t]*\n?", re.MULTILINE)
 _MISSING_DEBUG   = re.compile(r"E0277|doesn't implement `Debug`")
 _STRUCT_ENUM_DEF = re.compile(r"^(\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum)\s)", re.MULTILINE)
 
@@ -1389,6 +1421,49 @@ def write_example(path: Path, record: dict) -> None:
 
 
 # ─────────────────────────────────────────────────────────
+#  DEDUPLICATION HASHES
+# ─────────────────────────────────────────────────────────
+
+def _hash_dir(output_dir: Path) -> Path:
+    """Return the .hashes sub-directory, creating it if necessary."""
+    d = output_dir / ".hashes"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _hash_file(output_dir: Path, category: str) -> Path:
+    return _hash_dir(output_dir) / f"{safe_filename(category)}.txt"
+
+
+def example_hash(record: dict) -> str:
+    """
+    Compute a stable SHA-256 fingerprint for an example.
+    We hash broken_code + fixed_code after normalisation so that purely
+    cosmetic differences (whitespace, comments, allow-attrs) are ignored —
+    the same logic used by parse_example's no-fix check.
+    """
+    broken = _normalize_code(record.get("broken_code", ""))
+    fixed  = _normalize_code(record.get("fixed_code",  ""))
+    payload = f"{broken}\x00{fixed}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def load_hashes(output_dir: Path, category: str) -> set[str]:
+    """Load the set of known hashes for *category* from disk."""
+    hf = _hash_file(output_dir, category)
+    if not hf.exists():
+        return set()
+    with open(hf, encoding="utf-8") as f:
+        return {line.strip() for line in f if line.strip()}
+
+
+def save_hash(output_dir: Path, category: str, h: str) -> None:
+    """Append a single hash to the category hash file."""
+    with open(_hash_file(output_dir, category), "a", encoding="utf-8") as f:
+        f.write(h + "\n")
+
+
+# ─────────────────────────────────────────────────────────
 #  CATEGORIES
 # ─────────────────────────────────────────────────────────
 
@@ -1477,38 +1552,56 @@ def run(args: argparse.Namespace) -> None:
 
         console.print(f"[cat]{cat_name}[/cat]  [dim]({existing} existing, {remaining} to generate)[/dim]")
 
+        # Load deduplication hashes for this category.
+        # Also seed from any existing JSONL records that pre-date the hash files.
+        known_hashes: set[str] = load_hashes(output_dir, cat_name)
+        if out_path.exists() and not known_hashes:
+            with open(out_path, encoding="utf-8") as _f:
+                for _line in _f:
+                    _line = _line.strip()
+                    if _line:
+                        try:
+                            _h = example_hash(json.loads(_line))
+                            known_hashes.add(_h)
+                        except Exception:
+                            pass
+            # Persist the seeded hashes so future runs skip the JSONL scan
+            if known_hashes:
+                hf = _hash_file(output_dir, cat_name)
+                with open(hf, "w", encoding="utf-8") as _f:
+                    _f.write("\n".join(known_hashes) + "\n")
+
         generated_this_cat = 0
         attempt = 0
-        consecutive_same_reason = 0
-        last_seen_reason: str = ""
-        _CONSEC_BAIL = 4   # bail after this many identical rejection reasons in a row
+        consecutive_failures = 0
 
         while generated_this_cat < remaining:
             attempt += 1
-            if attempt > remaining * 4:
-                console.print(f"  [warn]Too many attempts for {cat_name!r}, moving on.[/warn]")
-                break
 
             console.print(f"  [dim]attempt {attempt}…[/dim]")
 
             def _fail(reason: str) -> None:
-                """Increment counters and track consecutive same-reason runs."""
-                nonlocal total_fail, consecutive_same_reason, last_seen_reason
+                """Increment fail counters; caller checks consecutive_failures to bail."""
+                nonlocal total_fail, consecutive_failures
                 total_fail += 1
-                if reason == last_seen_reason:
-                    consecutive_same_reason += 1
-                else:
-                    consecutive_same_reason = 1
-                    last_seen_reason = reason
+                consecutive_failures += 1
+
+            def _bail_if_stuck() -> bool:
+                """Return True (and print a warning) when the failure streak hits the cap."""
+                if consecutive_failures >= MAX_FAILURES:
+                    console.print(
+                        f"  [warn]{MAX_FAILURES} failures — "
+                        f"skipping category.[/warn]"
+                    )
+                    return True
+                return False
 
             # ── LLM call ─────────────────────────────────────────────
-            user_prompt = build_user_prompt(cat)
+            user_prompt = build_user_prompt(cat, attempt=attempt)
             raw = call_llm(model, user_prompt)
             if raw is None:
                 _fail("llm-error")
-                if consecutive_same_reason >= _CONSEC_BAIL:
-                    console.print(f"  [warn]{_CONSEC_BAIL} consecutive '{last_seen_reason}' — skipping category.[/warn]")
-                    break
+                if _bail_if_stuck(): break
                 continue
 
             # ── JSON parse ────────────────────────────────────────────
@@ -1518,18 +1611,21 @@ def run(args: argparse.Namespace) -> None:
                 console.print(f"  [warn]JSON parse failed (attempt {attempt})  [{reason}][/warn]")
                 log_parse_failure(cat_name, attempt, model, raw, reason=reason)
                 _fail(reason)
-                if consecutive_same_reason >= _CONSEC_BAIL:
-                    console.print(f"  [warn]{_CONSEC_BAIL} consecutive '{last_seen_reason}' — skipping category.[/warn]")
-                    break
+                if _bail_if_stuck(): break
                 continue
 
-            fixed_code = _ALLOW_ATTR.sub("", _PYTHON_COMMENT.sub("", example.get("fixed_code", ""))).strip()
+            fixed_code = _ALLOW_ATTR.sub("", _PYTHON_COMMENT.sub("", example.get("fixed_code", ""))).strip().lstrip("\n")
             if not fixed_code:
                 console.print(f"  [warn]Empty fixed_code (attempt {attempt})[/warn]")
                 _fail("empty-fixed-code")
-                if consecutive_same_reason >= _CONSEC_BAIL:
-                    console.print(f"  [warn]{_CONSEC_BAIL} consecutive '{last_seen_reason}' — skipping category.[/warn]")
-                    break
+                if _bail_if_stuck(): break
+                continue
+
+            broken_code = _ALLOW_ATTR.sub("", _PYTHON_COMMENT.sub("", example.get("broken_code", ""))).strip().lstrip("\n")
+            if not broken_code:
+                console.print(f"  [warn]Empty broken_code (attempt {attempt})[/warn]")
+                _fail("empty-broken-code")
+                if _bail_if_stuck(): break
                 continue
 
             # ── Broken-code sanity check ──────────────────────────────
@@ -1537,8 +1633,7 @@ def run(args: argparse.Namespace) -> None:
             # to compile.  If it passes, the model hallucinated the error —
             # reject cheaply before spending cargo time on fixed_code.
             if example.get("error_code") == "compile-error":
-                broken_code = _ALLOW_ATTR.sub("", _PYTHON_COMMENT.sub("", example.get("broken_code", ""))).strip()
-                if broken_code and check_broken_compiles(broken_code, example.get("crates", [])):
+                if check_broken_compiles(broken_code, example.get("crates", [])):
                     console.print(
                         f"  [warn]broken_code compiles cleanly (attempt {attempt}) "
                         f"[broken-compiles][/warn]"
@@ -1546,9 +1641,7 @@ def run(args: argparse.Namespace) -> None:
                     log_parse_failure(cat_name, attempt, model,
                                       raw, reason="broken-compiles")
                     _fail("broken-compiles")
-                    if consecutive_same_reason >= _CONSEC_BAIL:
-                        console.print(f"  [warn]{_CONSEC_BAIL} consecutive '{last_seen_reason}' — skipping category.[/warn]")
-                        break
+                    if _bail_if_stuck(): break
                     continue
 
             # ── Cargo validation ──────────────────────────────────────
@@ -1566,9 +1659,7 @@ def run(args: argparse.Namespace) -> None:
                     raw, fixed_code, val["wrapped_code"], val["errors"],
                 )
                 _fail("cargo-check")
-                if consecutive_same_reason >= _CONSEC_BAIL:
-                    console.print(f"  [warn]{_CONSEC_BAIL} consecutive '{last_seen_reason}' — skipping category.[/warn]")
-                    break
+                if _bail_if_stuck(): break
                 continue
 
             # ── Build the output record ───────────────────────────────
@@ -1580,7 +1671,7 @@ def run(args: argparse.Namespace) -> None:
                 "category":         cat_name,
                 "difficulty":       example.get("difficulty", cat.get("difficulty", "intermediate")),
                 "prompt":           example["prompt"],
-                "broken_code":      _PYTHON_COMMENT.sub("", example.get("broken_code", "")),
+                "broken_code":      broken_code,
                 "error_message":    example.get("error_message", ""),
                 "error_code":       example.get("error_code", ""),
                 "fixed_code":       fixed_code,
@@ -1610,12 +1701,19 @@ def run(args: argparse.Namespace) -> None:
                     val["clippy_lints"], fixed_code,
                 )
 
+            # ── Deduplication check ───────────────────────────────────
+            h = example_hash(record)
+            if h in known_hashes:
+                console.print(f"  [warn]Duplicate example detected — skipping (attempt {attempt})[/warn]")
+                _fail("duplicate")
+                if _bail_if_stuck(): break
+                continue
+
             write_example(out_path, record)
+            save_hash(output_dir, cat_name, h)
+            known_hashes.add(h)
             generated_this_cat += 1
             total_ok           += 1
-            consecutive_same_reason = 0   # success resets the streak
-            last_seen_reason        = ""
-
             # ── Cooldown ──────────────────────────────────────────────
             if cooldown_every > 0 and total_ok % cooldown_every == 0:
                 console.print(

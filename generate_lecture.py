@@ -373,6 +373,14 @@ class LecturePromptVariator:
 #  CATEGORY / OUTPUT HELPERS
 # ─────────────────────────────────────────────────────────
 
+def _safe_filename(name: str) -> str:
+    """Sanitise a category name for use as a filename on all platforms."""
+    invalid = r'\/:*?"<>|'
+    for ch in invalid:
+        name = name.replace(ch, "")
+    return name.strip()
+
+
 def _normalize_category(cat: dict) -> dict:
     if "prompt_focus" not in cat:
         return cat
@@ -380,7 +388,6 @@ def _normalize_category(cat: dict) -> dict:
     raw_name = cat["category"]
     parts    = raw_name.split(" - ", 1)
     subcategory = parts[0].strip() if len(parts) == 2 else raw_name
-    slug = re.sub(r"[^a-z0-9]+", "_", raw_name.lower()).strip("_")
     tags = cat.get("tags", [])
     system_hint = (
         f"Difficulty: {cat.get('difficulty', 'intermediate')}. "
@@ -388,7 +395,8 @@ def _normalize_category(cat: dict) -> dict:
         + (f" Key concepts: {', '.join(tags)}." if tags else "")
     )
     return {
-        "id":          slug,
+        "id":          _safe_filename(raw_name),   # used for filenames & dedup keys
+        "category_id": cat.get("id", ""),          # original id field from the JSONL
         "category":    "Rust",
         "subcategory": subcategory,
         "topic":       raw_name,
@@ -977,7 +985,7 @@ def parse_lecture(raw: str, cat: dict) -> Optional[dict]:
     if data is None:
         return None
     return {
-        "category_id":  cat["id"],
+        "category_id":  cat.get("category_id", cat["id"]),
         "category":     cat["category"],
         "subcategory":  cat["subcategory"],
         "topic":        cat["topic"],

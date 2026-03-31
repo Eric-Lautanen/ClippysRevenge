@@ -6,7 +6,7 @@
 ╚══════════════════════════════════════════════════════════╝
 
 Usage (PowerShell — all one line):
-python generate_convos.py generate --models "qwen3.5-4b@q3_k_m" "qwen3.5-4b@q3_k_m" "qwen3.5-4b@q3_k_m" --count 50000 --rotate-every 50 --output-dir ./data/convos
+python generate_convos.py generate --models "tesslate_tessa-rust-t1-7b" "qwen3.5-4b@q3_k_m" "qwen3.5-4b@q3_k_m" --count 50000 --rotate-every 50 --output-dir ./data/convos
     python generate_convos.py stats  --output-dir ./data/convos
     python generate_convos.py sample --output-dir ./data/convos --category rust_ownership
 
@@ -435,6 +435,14 @@ class PromptVariator:
 #  CATEGORY / OUTPUT HELPERS
 # ─────────────────────────────────────────────────────────
 
+def _safe_filename(name: str) -> str:
+    """Sanitise a category name for use as a filename on all platforms."""
+    invalid = r'\/:*?"<>|'
+    for ch in invalid:
+        name = name.replace(ch, "")
+    return name.strip()
+
+
 def _normalize_category(cat: dict) -> dict:
     """
     Adapt a rust_categories.jsonl record to the field names generate.py expects.
@@ -448,9 +456,6 @@ def _normalize_category(cat: dict) -> dict:
     parts = raw_name.split(" - ", 1)
     subcategory = parts[0].strip() if len(parts) == 2 else raw_name
 
-    # Stable file-safe ID from the full category name
-    slug = re.sub(r"[^a-z0-9]+", "_", raw_name.lower()).strip("_")
-
     tags = cat.get("tags", [])
     system_hint = (
         f"Difficulty: {cat.get('difficulty', 'intermediate')}. "
@@ -459,7 +464,8 @@ def _normalize_category(cat: dict) -> dict:
     )
 
     return {
-        "id":          slug,
+        "id":          _safe_filename(raw_name),   # used for filenames & dedup keys
+        "category_id": cat.get("id", ""),          # original id field from the JSONL
         "category":    "Rust",
         "subcategory": subcategory,
         "topic":       raw_name,
@@ -1928,7 +1934,7 @@ def parse_conversation(raw: str, cat: dict) -> Optional[dict]:
     turns = data["turns"]   # already validated by repair_and_parse
 
     return {
-        "category_id":  cat["id"],
+        "category_id":  cat.get("category_id", cat["id"]),
         "category":     cat["category"],
         "subcategory":  cat["subcategory"],
         "topic":        cat["topic"],
