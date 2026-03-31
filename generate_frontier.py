@@ -152,38 +152,26 @@ CRATE_MAP: dict[str, str] = {
 # ─────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
-You are a Rust expert generating training data. Output ONLY raw JSON — \
-no markdown, no code fences, no preamble or explanation outside the JSON.
+Rust expert generating training data. Output ONE raw JSON object — no fences, no prose, nothing else.
 
-Generate exactly one JSON object:
 {
-  "category": "<category name as given>",
+  "category": "<as given>",
   "difficulty": "<beginner|intermediate|advanced>",
-  "prompt": "<realistic developer question describing a bug/confusion — 1-3 sentences>",
-  "broken_code": "<complete self-contained Rust source — fn main, use stmts, everything needed>",
-  "error_message": "<exact compiler error text OR description of wrong runtime behaviour>",
+  "prompt": "<1-3 sentence developer question about the bug>",
+  "broken_code": "<complete Rust file — fn main + all use stmts — that FAILS to compile>",
+  "error_message": "<exact compiler error or runtime behaviour>",
   "error_code": "<compile-error|logic-bug|design-issue|runtime-panic>",
-  "fixed_code": "<complete, idiomatic, working Rust source that fixes the issue>",
-  "explanation": "<2-4 sentences: why it was wrong and what the fix does>",
-  "concepts": ["<tag>", "..."],
-  "crates": ["<crate-name>", "..."]
+  "fixed_code": "<complete, idiomatic Rust file that compiles and passes clippy>",
+  "explanation": "<2-4 sentences: root cause and what the fix does>",
+  "concepts": ["<tag>"],
+  "crates": []
 }
 
 Rules:
-- Both broken_code and fixed_code must be COMPLETE Rust files \
-(fn main or #[tokio::main] async fn main, all use statements included).
-- Use edition 2021.
-- broken_code must illustrate a REAL, common mistake — not a trivial typo.
-- broken_code MUST actually trigger the stated error when compiled. \
-Do NOT emit code that already compiles as broken_code.
-- fixed_code MUST be different from broken_code in a meaningful, \
-semantic way — not just whitespace or comment changes.
-- If you cannot produce a broken_code that genuinely fails to compile \
-with a real fix available, choose a different example entirely.
-- fixed_code must be idiomatic and pass clippy without warnings.
-- If no external crates are needed, set "crates" to [].
-- Output ONLY the JSON object. Nothing else."""
-
+- Both code fields must be complete Rust files (fn main or async fn main, all use stmts), edition 2021.
+- broken_code MUST fail to compile with the stated error — not a trivial typo.
+- fixed_code MUST differ from broken_code semantically, not just whitespace or comments.
+- No external crates. crates is always []."""
 
 def build_user_prompt(cat: dict) -> str:
     parts = [
@@ -673,6 +661,92 @@ def _repair_unescaped_quotes(text: str) -> Optional[dict]:
     return None   # exceeded iteration limit
 
 
+def _repair_stray_closing_braces(text: str) -> Optional[dict]:
+    """
+    Remove stray },  that appear directly after a string field value.
+
+    Some models emit an extra closing brace after multi-line code fields:
+        "broken_code": "...",
+        },               ← spurious — the object is not closed here
+        "error_message": "..."
+
+    The pattern is unambiguous: a `},` that follows a closing string quote
+    (`",`) cannot be a legitimate nested-object close (which would follow the
+    LAST field of the nested object, with no comma on the preceding line).
+    """
+    fixed = re.sub(r'",(\s*\n\s*)\},', r'",\1', text)
+    if fixed == text:
+        return None
+    return _repair_and_parse_base(fixed)
+
+
+def _repair_overescaped_quotes(text: str) -> Optional[dict]:
+    """
+    Fix JSON where the model emits backslash-escaped quotes *outside* string
+    context, most commonly in array literals:
+        "concepts": [\"two-phase borrows\", \"borrow checker\"]
+    instead of:
+        "concepts": ["two-phase borrows", "borrow checker"]
+
+    Walk the text tracking in/out-of-string state.  When outside a string,
+    a `\"` sequence is invalid JSON; drop the backslash and treat the `"` as
+    opening a new string.
+
+    When a string IS opened by a stripped `\"` delimiter we set a flag so
+    that the matching closing `\"` also has its backslash dropped (rather than
+    being misread as an escaped inner quote).  Strings opened normally with `"`
+    are unaffected.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(text)
+    changed = False
+    in_str = False
+    escaped_open = False   # True when current string was opened by \"
+
+    while i < n:
+        ch = text[i]
+        if in_str:
+            if ch == '\\' and i + 1 < n:
+                nxt = text[i + 1]
+                if nxt == '"' and escaped_open:
+                    # Closing delimiter of a \"...\"-delimited string
+                    out.append('"')
+                    in_str = False
+                    escaped_open = False
+                    i += 2
+                else:
+                    out.append(ch)
+                    out.append(nxt)
+                    i += 2
+            elif ch == '"':
+                out.append(ch)
+                in_str = False
+                escaped_open = False
+                i += 1
+            else:
+                out.append(ch)
+                i += 1
+        else:
+            if ch == '\\' and i + 1 < n and text[i + 1] == '"':
+                # Backslash before quote outside a string — drop the backslash
+                out.append('"')
+                in_str = True
+                escaped_open = True
+                changed = True
+                i += 2
+            elif ch == '"':
+                out.append(ch)
+                in_str = True
+                escaped_open = False
+                i += 1
+            else:
+                out.append(ch)
+                i += 1
+
+    return _try_parse(''.join(out)) if changed else None
+
+
 def _repair_and_parse(text: str) -> Optional[dict]:
     """
     Try a chain of repairs on *text*, from cheapest to most invasive.
@@ -685,10 +759,12 @@ def _repair_and_parse(text: str) -> Optional[dict]:
       5. Truncation recovery (close unclosed strings/objects)
       6. Rust raw-string conversion  (r#"..."# → JSON string)
       7. JSON comment stripping  (// and /* */ comments)
-      8. Unescaped inner-quote repair (iterative backslash insertion)
-      9. Combined: rust-raw + unescaped-quote
-     10. Combined: comments + unescaped-quote
-     11. Combined: escape fix + unescaped-quote (for literal-CRLF + bare-quote)
+      8. Stray closing-brace removal  (},  after string field values)
+      9. Over-escaped quotes in array context  ([\"tag\"] → ["tag"])
+     10. Unescaped inner-quote repair (iterative backslash insertion)
+     11. Combined: rust-raw + unescaped-quote
+     12. Combined: comments + unescaped-quote
+     13. Combined: escape fix + unescaped-quote (for literal-CRLF + bare-quote)
     """
     # ── fast path ─────────────────────────────────────────────────────
     if (d := _try_parse(text)):                          return d
@@ -715,6 +791,12 @@ def _repair_and_parse(text: str) -> Optional[dict]:
     nc, nc_changed = _fix_json_comments(text)
     if nc_changed:
         if (d := _repair_and_parse_base(nc)):            return d
+
+    # ── stray closing braces (},  after a string value mid-object) ────
+    if (d := _repair_stray_closing_braces(text)):        return d
+
+    # ── over-escaped quotes outside string context ([\"tag\"] pattern) ─
+    if (d := _repair_overescaped_quotes(text)):          return d
 
     # ── unescaped inner quotes (the println!("{}", x) problem) ────────
     if (d := _repair_unescaped_quotes(text)):            return d
