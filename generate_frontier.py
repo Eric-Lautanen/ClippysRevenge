@@ -174,6 +174,12 @@ Rules:
 (fn main or #[tokio::main] async fn main, all use statements included).
 - Use edition 2021.
 - broken_code must illustrate a REAL, common mistake — not a trivial typo.
+- broken_code MUST actually trigger the stated error when compiled. \
+Do NOT emit code that already compiles as broken_code.
+- fixed_code MUST be different from broken_code in a meaningful, \
+semantic way — not just whitespace or comment changes.
+- If you cannot produce a broken_code that genuinely fails to compile \
+with a real fix available, choose a different example entirely.
 - fixed_code must be idiomatic and pass clippy without warnings.
 - If no external crates are needed, set "crates" to [].
 - Output ONLY the JSON object. Nothing else."""
@@ -384,9 +390,15 @@ _THINK_CLOSE = re.compile(r"</think>", re.IGNORECASE)
 _THINK_BLOCK = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
 
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
+# Matches any { … } block, even if preceded by prose / preamble text.
+_JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 
 REQUIRED_FIELDS = {"category", "difficulty", "prompt", "broken_code",
                    "error_message", "error_code", "fixed_code", "explanation"}
+
+_VALID_ERROR_CODES = {"compile-error", "logic-bug", "design-issue", "runtime-panic"}
+_VALID_DIFFICULTIES = {"beginner", "intermediate", "advanced"}
+_MIN_CODE_LEN = 20   # characters — reject suspiciously tiny code snippets
 
 
 # ── JSON repair helpers ───────────────────────────────────────────────────────
@@ -399,18 +411,125 @@ def _try_parse(text: str) -> Optional[dict]:
         return None
 
 
+def _preprocess(text: str) -> str:
+    """
+    Normalise raw LLM output before any JSON repair attempts.
+      • Strip UTF-8 BOM
+      • Remove null bytes
+      • Normalise Windows line endings (\\r\\n → \\n) and bare \\r → \\n
+        so that literal CR/CRLF inside JSON strings are handled uniformly
+        by _apply_escapes rather than surfacing as 'Invalid control character'.
+    """
+    text = text.lstrip('\ufeff')
+    text = text.replace('\x00', '')
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    return text
+
+
+# Valid single-char JSON escape followers: " \\ / b f n r t u
+_VALID_JSON_ESC = frozenset('"\\/ bfnrtu')
+
+# Rust raw-string pattern: r#"..."# with any number of # delimiters
+_RUST_RAW_STR = re.compile(r'r(#+)"(.*?)\1"', re.DOTALL)
+
+
+def _fix_rust_raw_strings(text: str) -> tuple[str, bool]:
+    """
+    Convert Rust raw-string literals (r#"..."#, r##"..."##) that the model
+    sometimes emits directly as JSON field values into proper JSON strings.
+
+    In a Rust raw string every character is literal — backslashes are NOT
+    escape characters — so we must escape everything for JSON.
+    """
+    if 'r#"' not in text:
+        return text, False
+
+    def _to_json_str(m: re.Match) -> str:
+        content = m.group(2)
+        # Backslashes in raw strings are literal; escape them first
+        content = content.replace('\\', '\\\\')
+        content = content.replace('"',  '\\"')
+        content = content.replace('\n', '\\n')
+        content = content.replace('\r', '\\r')
+        content = content.replace('\t', '\\t')
+        # Escape remaining control chars
+        out: list[str] = []
+        for ch in content:
+            cp = ord(ch)
+            out.append(f'\\u{cp:04x}' if cp < 0x20 else ch)
+        return '"' + ''.join(out) + '"'
+
+    fixed = _RUST_RAW_STR.sub(_to_json_str, text)
+    return fixed, fixed != text
+
+
+def _fix_json_comments(text: str) -> tuple[str, bool]:
+    """
+    Strip // line-comments that appear outside JSON string values.
+    Models occasionally add them (e.g. after trailing commas or at EOF).
+    Also strips /* … */ block comments.
+    This is deliberately conservative: we only strip when we can confirm
+    the // sits outside a quoted string by tracking quote state per line.
+    """
+    changed = False
+    out_lines: list[str] = []
+    for line in text.split('\n'):
+        in_str = False
+        result: list[str] = []
+        i = 0
+        while i < len(line):
+            ch = line[i]
+            if in_str:
+                if ch == '\\' and i + 1 < len(line):
+                    result.append(ch)
+                    result.append(line[i + 1])
+                    i += 2
+                elif ch == '"':
+                    result.append(ch)
+                    in_str = False
+                    i += 1
+                else:
+                    result.append(ch)
+                    i += 1
+            else:
+                if ch == '"':
+                    result.append(ch)
+                    in_str = True
+                    i += 1
+                elif ch == '/' and i + 1 < len(line) and line[i + 1] == '/':
+                    changed = True
+                    break  # drop the rest of the line
+                else:
+                    result.append(ch)
+                    i += 1
+        out_lines.append(''.join(result).rstrip())
+
+    result_text = '\n'.join(out_lines)
+    # Block comments (approximate — not string-aware, but models rarely nest them)
+    stripped = re.sub(r'/\*.*?\*/', '', result_text, flags=re.DOTALL)
+    if stripped != result_text:
+        changed = True
+        result_text = stripped
+    return result_text, changed
+
+
 def _apply_escapes(text: str) -> tuple[str, bool]:
     """
-    Walk JSON character by character and fix common string-value issues:
-      • literal \\n / \\r / \\t → proper escape sequences
-      • \\\\\" (double-backslash + quote) → \\\" (escaped quote)
+    Walk JSON character by character and fix string-value issues:
+      • Literal control chars (\\n \\r \\t, 0x00–0x1F) → proper escape sequences
+      • Bare backslash not followed by a valid JSON escape char → \\\\
+      • \\\\\\\" (double-backslash + quote) → \\" (fix double-escaped quotes)
     Returns (fixed_text, changed).
+
+    NOTE: This function tracks in-string state with a simple quote toggle so
+    it works reliably only when the string boundaries are well-formed.  Use
+    _repair_unescaped_quotes for the harder case of unescaped inner quotes.
     """
     out: list[str] = []
     i = 0
     n = len(text)
-    changed  = False
-    in_str   = False
+    changed = False
+    in_str  = False
 
     while i < n:
         ch = text[i]
@@ -420,26 +539,37 @@ def _apply_escapes(text: str) -> tuple[str, bool]:
                 in_str = True
             i += 1
             continue
+
         # ── inside a string value ────────────────────────────────────
         if ch == '\\':
             nxt = text[i + 1] if i + 1 < n else ''
             if nxt == '\\' and i + 2 < n and text[i + 2] == '"':
-                # \\" → \" (double-backslash before quote → escaped quote)
+                # \\\" → \" — fix double-escaped quotes the model emits
                 out.append('\\"')
                 i += 3
                 changed = True
+            elif nxt in _VALID_JSON_ESC:
+                # Legitimate JSON escape sequence — pass through verbatim
+                out.append(ch)
+                out.append(nxt)
+                i += 2
             else:
-                out.append(ch); i += 1
-                if i < n:
-                    out.append(text[i]); i += 1
+                # Bare backslash not starting a valid escape → escape it
+                out.append('\\\\')
+                changed = True
+                i += 1
         elif ch == '"':
-            out.append(ch); in_str = False; i += 1
+            out.append(ch)
+            in_str = False
+            i += 1
         elif ch == '\n':
-            out.append('\\n'); changed = True; i += 1
+            out.append('\\n');                  changed = True; i += 1
         elif ch == '\r':
-            out.append('\\r'); changed = True; i += 1
+            out.append('\\r');                  changed = True; i += 1
         elif ch == '\t':
-            out.append('\\t'); changed = True; i += 1
+            out.append('\\t');                  changed = True; i += 1
+        elif ord(ch) < 0x20:
+            out.append(f'\\u{ord(ch):04x}');   changed = True; i += 1
         else:
             out.append(ch); i += 1
 
@@ -489,56 +619,232 @@ def _repair_truncated(text: str) -> Optional[dict]:
     return _try_parse(text + suffix)
 
 
+def _repair_unescaped_quotes(text: str) -> Optional[dict]:
+    """
+    Fix JSON where string values contain unescaped double-quote characters —
+    the most common failure mode when the model emits Rust code with format
+    strings like println!(\"{}\", x) but forgets to escape the inner quotes.
+
+    Strategy: iteratively try json.loads, use the JSONDecodeError position to
+    locate the most recent unescaped '"' that caused the parser to exit string
+    context prematurely, insert a backslash there, and retry.
+
+    The backward search from the error position looks for the last '"' that
+    is not already preceded by an odd run of backslashes (i.e. not already
+    escaped).  We search at most _UQ_LOOKBACK chars back to avoid clobbering
+    quotes from earlier, correctly-bounded fields.
+
+    Cap at _UQ_MAX_FIXES iterations to prevent infinite loops on truly
+    malformed input.
+    """
+    _UQ_MAX_FIXES  = 80   # max quotes to escape in one call
+    _UQ_LOOKBACK   = 400  # chars to search back from the error position
+
+    fixed = text
+
+    for _ in range(_UQ_MAX_FIXES):
+        try:
+            result = json.loads(fixed)
+            return result if isinstance(result, dict) else None
+        except json.JSONDecodeError as e:
+            pos = e.pos
+            # Scan backward from the error position for the last unescaped '"'
+            candidate: Optional[int] = None
+            limit = max(0, pos - _UQ_LOOKBACK)
+            for i in range(pos - 1, limit - 1, -1):
+                if fixed[i] != '"':
+                    continue
+                # Count preceding backslashes to determine if already escaped
+                bs = 0
+                j  = i - 1
+                while j >= 0 and fixed[j] == '\\':
+                    bs += 1
+                    j  -= 1
+                if bs % 2 == 0:   # even number of backslashes → unescaped
+                    candidate = i
+                    break
+
+            if candidate is None:
+                return None   # can't find a fixable quote
+
+            # Insert a backslash before the unescaped '"'
+            fixed = fixed[:candidate] + '\\"' + fixed[candidate + 1:]
+
+    return None   # exceeded iteration limit
+
+
 def _repair_and_parse(text: str) -> Optional[dict]:
-    """Try a chain of lightweight repairs before giving up."""
-    if (d := _try_parse(text)):               return d
-    if (d := _repair_trailing_commas(text)):  return d
-    if (d := _repair_escapes(text)):          return d
-    # trailing commas + escapes combined
+    """
+    Try a chain of repairs on *text*, from cheapest to most invasive.
+
+    Order:
+      1. Direct parse (no repair needed)
+      2. Trailing-comma removal
+      3. Control-char / escape normalisation (_apply_escapes)
+      4. Combined trailing-commas + escape fix
+      5. Truncation recovery (close unclosed strings/objects)
+      6. Rust raw-string conversion  (r#"..."# → JSON string)
+      7. JSON comment stripping  (// and /* */ comments)
+      8. Unescaped inner-quote repair (iterative backslash insertion)
+      9. Combined: rust-raw + unescaped-quote
+     10. Combined: comments + unescaped-quote
+     11. Combined: escape fix + unescaped-quote (for literal-CRLF + bare-quote)
+    """
+    # ── fast path ─────────────────────────────────────────────────────
+    if (d := _try_parse(text)):                          return d
+    if (d := _repair_trailing_commas(text)):             return d
+
+    esc, esc_changed = _apply_escapes(text)
+    if esc_changed:
+        if (d := _try_parse(esc)):                       return d
+
     tc = re.sub(r",\s*([}\]])", r"\1", text)
-    fixed, changed = _apply_escapes(tc)
-    if changed and (d := _try_parse(fixed)):  return d
-    # truncation (try on raw and escape-fixed variants)
-    if (d := _repair_truncated(text)):        return d
-    esc, changed = _apply_escapes(text)
-    if changed and (d := _repair_truncated(esc)): return d
+    tc_esc, tc_esc_changed = _apply_escapes(tc)
+    if tc_esc_changed and (d := _try_parse(tc_esc)):     return d
+
+    # ── truncation ────────────────────────────────────────────────────
+    if (d := _repair_truncated(text)):                   return d
+    if esc_changed and (d := _repair_truncated(esc)):    return d
+
+    # ── Rust raw strings ──────────────────────────────────────────────
+    rrs, rrs_changed = _fix_rust_raw_strings(text)
+    if rrs_changed:
+        if (d := _repair_and_parse_base(rrs)):           return d
+
+    # ── comment stripping ─────────────────────────────────────────────
+    nc, nc_changed = _fix_json_comments(text)
+    if nc_changed:
+        if (d := _repair_and_parse_base(nc)):            return d
+
+    # ── unescaped inner quotes (the println!("{}", x) problem) ────────
+    if (d := _repair_unescaped_quotes(text)):            return d
+    if esc_changed and (d := _repair_unescaped_quotes(esc)): return d
+
+    # ── combined: rust-raw → unescaped-quote ─────────────────────────
+    if rrs_changed and (d := _repair_unescaped_quotes(rrs)): return d
+
+    # ── combined: comments → unescaped-quote ─────────────────────────
+    if nc_changed and (d := _repair_unescaped_quotes(nc)): return d
+
     return None
 
 
+def _repair_and_parse_base(text: str) -> Optional[dict]:
+    """
+    Reduced repair chain used recursively (no Rust-raw or comment steps,
+    to avoid infinite recursion when those fixes call back into repair).
+    """
+    if (d := _try_parse(text)):                          return d
+    if (d := _repair_trailing_commas(text)):             return d
+    esc, changed = _apply_escapes(text)
+    if changed and (d := _try_parse(esc)):               return d
+    if (d := _repair_truncated(text)):                   return d
+    if changed and (d := _repair_truncated(esc)):        return d
+    if (d := _repair_unescaped_quotes(text)):            return d
+    if changed and (d := _repair_unescaped_quotes(esc)): return d
+    return None
+
+
+def _extract_json_candidates(text: str) -> list[str]:
+    """
+    Return candidate JSON substrings from *text*, from most to least specific.
+
+    Strategy order:
+      1. Content inside a ```json ... ``` or ``` ... ``` fence
+      2. Outermost { … } span (greedy: first { to last })
+      3. Any { … } match found by regex (handles leading prose + trailing junk)
+      4. Slice from first { to end (for truncated responses)
+    """
+    candidates: list[str] = []
+
+    # 1. Fenced block
+    m = _FENCE.search(text)
+    if m:
+        candidates.append(m.group(1).strip())
+
+    # 2. Outermost braces
+    start = text.find("{")
+    end   = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidates.append(text[start:end + 1])
+
+    # 3. Regex-located object (catches preamble + trailing garbage)
+    m2 = _JSON_OBJECT.search(text)
+    if m2 and m2.group(0) not in candidates:
+        candidates.append(m2.group(0))
+
+    # 4. Truncated: everything from the first brace onwards
+    if start != -1:
+        tail = text[start:]
+        if tail not in candidates:
+            candidates.append(tail)
+
+    return candidates
+
+
 # ─────────────────────────────────────────────────────────────────────────────
+
+# Stores the reason the most recent parse_example call was rejected.
+# Read immediately after a None return to get a loggable label.
+_last_reject_reason: str = "json-parse"
+
+# Collapse line comments, block comments, and all whitespace runs so that
+# code blocks that differ only cosmetically still compare equal.
+_STRIP_LINE_COMMENT  = re.compile(r"//[^\n]*")
+_STRIP_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_COLLAPSE_WS         = re.compile(r"\s+")
+
+
+def _normalize_code(code: str) -> str:
+    """
+    Normalise a Rust snippet for fuzzy equality comparison.
+    Strips // and /* */ comments, then collapses all whitespace runs to a
+    single space.  Used to catch "no-fix" cases where the model only made
+    cosmetic (whitespace / comment) changes between broken_code and fixed_code.
+    """
+    code = _STRIP_LINE_COMMENT.sub("", code)
+    code = _STRIP_BLOCK_COMMENT.sub("", code)
+    return _COLLAPSE_WS.sub(" ", code).strip()
+
 
 def parse_example(text: str) -> Optional[dict]:
     """
     Parse LLM output as a frontier JSON example.
     Returns the dict or None if parsing or validation fails.
+
+    Extraction strategy: tries multiple candidate substrings (fenced block,
+    outermost braces, regex-located object, truncation fallback) and applies
+    the full repair chain to each before giving up.
+
+    Content validation (post-parse):
+      • All REQUIRED_FIELDS present
+      • broken_code and fixed_code are not identical (no fix was applied)
+      • Neither code is suspiciously short
+      • error_code is one of the four canonical values
     """
-    # Strip markdown fences if present
-    m = _FENCE.search(text)
-    if m:
-        text = m.group(1).strip()
+    global _last_reject_reason
+    _last_reject_reason = "json-parse"   # default if we can't even extract JSON
 
-    # Find outermost { }
-    start = text.find("{")
-    end   = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        # Might be truncated before the closing brace
-        start = text.find("{")
-        if start == -1:
-            return None
-        text = text[start:]
-    else:
-        text = text[start:end + 1]
+    data: Optional[dict] = None
 
-    data = _repair_and_parse(text)
+    for candidate in _extract_json_candidates(text):
+        if not candidate:
+            continue
+        data = _repair_and_parse(candidate)
+        if isinstance(data, dict):
+            break
 
     if not isinstance(data, dict):
         return None
 
+    # ── Required-field check ──────────────────────────────────────────
     missing = REQUIRED_FIELDS - data.keys()
     if missing:
+        _last_reject_reason = "missing-fields"
+        data["_reject_reason"] = "missing-fields"
         return None
 
-    # Normalise list fields
+    # ── Normalise list fields ─────────────────────────────────────────
     if isinstance(data.get("concepts"), str):
         data["concepts"] = [t.strip() for t in data["concepts"].split(",") if t.strip()]
     if isinstance(data.get("crates"), str):
@@ -547,6 +853,40 @@ def parse_example(text: str) -> Optional[dict]:
         data["concepts"] = []
     if not isinstance(data.get("crates"), list):
         data["crates"] = []
+
+    # ── Content quality checks ────────────────────────────────────────
+    broken  = data.get("broken_code",  "").strip()
+    fixed   = data.get("fixed_code",   "").strip()
+    error_c = data.get("error_code",   "")
+
+    # Reject if the model returned the same code for both fields (exact or fuzzy).
+    # Fuzzy comparison strips comments and collapses whitespace so that purely
+    # cosmetic differences (reformatting, added/removed blank lines, comment-only
+    # changes) are still caught as no-fix.
+    if broken == fixed or _normalize_code(broken) == _normalize_code(fixed):
+        _last_reject_reason = "no-fix"
+        return None
+
+    # Reject trivially short code (almost certainly a placeholder)
+    if len(broken) < _MIN_CODE_LEN or len(fixed) < _MIN_CODE_LEN:
+        _last_reject_reason = "too-short"
+        return None
+
+    # Normalise error_code to the canonical set; reject unknown values
+    if error_c not in _VALID_ERROR_CODES:
+        lower_map = {v.lower(): v for v in _VALID_ERROR_CODES}
+        normalised = lower_map.get(error_c.lower())
+        if normalised:
+            data["error_code"] = normalised
+        else:
+            _last_reject_reason = "bad-error-code"
+            return None
+
+    # Normalise difficulty
+    diff = data.get("difficulty", "")
+    if diff not in _VALID_DIFFICULTIES:
+        lower_diff = {v.lower(): v for v in _VALID_DIFFICULTIES}
+        data["difficulty"] = lower_diff.get(diff.lower(), "intermediate")
 
     return data
 
@@ -784,6 +1124,36 @@ def validate(fixed_code: str, declared_crates: list[str]) -> dict:
     return result
 
 
+def check_broken_compiles(broken_code: str, declared_crates: list[str]) -> bool:
+    """
+    Return True if *broken_code* successfully passes cargo check — meaning the
+    model generated code that isn't actually broken, making the example invalid.
+
+    Only the error path is interesting here, so we skip clippy/fmt/msrv and
+    return as soon as cargo check finishes.  The shared target dir is reused
+    so incremental compilation keeps this fast.
+    """
+    wrapped = wrap_for_check(broken_code)
+    detected = detect_crates(wrapped)
+    all_crates = sorted(set(declared_crates + detected))
+
+    SHARED_TARGET_DIR.mkdir(parents=True, exist_ok=True)
+    cargo_env = {**os.environ, "CARGO_TARGET_DIR": str(SHARED_TARGET_DIR)}
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="frontier_brok_") as tmp:
+            proj = Path(tmp) / "rust-example"
+            proj.mkdir()
+            (proj / "Cargo.toml").write_text(make_cargo_toml(all_crates), encoding="utf-8")
+            src = proj / "src"
+            src.mkdir()
+            (src / "main.rs").write_text(wrapped, encoding="utf-8")
+            r = _run(["cargo", "check", "--quiet", "--color=never"], proj, env=cargo_env)
+            return r.returncode == 0
+    except Exception:
+        return False  # if cargo itself errors, don't block the attempt
+
+
 # ─────────────────────────────────────────────────────────
 #  OUTPUT
 # ─────────────────────────────────────────────────────────
@@ -848,13 +1218,28 @@ def log_clippy_failure(
         f.write(f"{_SEP} END {_SEP}\n")
 
 
-def log_parse_failure(cat_name: str, attempt: int, model: str, raw: str) -> None:
-    """Append a JSON parse failure record to frontier_parse_failures.log."""
+def log_parse_failure(
+    cat_name: str,
+    attempt: int,
+    model: str,
+    raw: str,
+    reason: str = "json-parse",
+) -> None:
+    """Append a JSON parse failure record to frontier_parse_failures.log.
+
+    *reason* is a short label for why parse_example returned None:
+      json-parse      — could not extract / repair valid JSON
+      no-fix          — broken_code identical to fixed_code (exact or fuzzy)
+      too-short       — one of the code fields is suspiciously short
+      bad-error-code  — error_code not in the canonical set
+      missing-fields  — one or more REQUIRED_FIELDS absent
+      broken-compiles — broken_code passes cargo check (not actually broken)
+    """
     import datetime
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open(_PARSE_FAIL_LOG, "a", encoding="utf-8") as f:
         f.write(f"\n{_SEP}\n")
-        f.write(f"  {ts}  cat={cat_name!r}  attempt={attempt}  model={model}\n")
+        f.write(f"  {ts}  cat={cat_name!r}  attempt={attempt}  model={model}  reason={reason}\n")
         f.write(f"{_SEP}\n")
         f.write(raw if raw else "<empty response>")
         if raw and not raw.endswith("\n"):
@@ -971,6 +1356,9 @@ def run(args: argparse.Namespace) -> None:
 
         generated_this_cat = 0
         attempt = 0
+        consecutive_same_reason = 0
+        last_seen_reason: str = ""
+        _CONSEC_BAIL = 4   # bail after this many identical rejection reasons in a row
 
         while generated_this_cat < remaining:
             attempt += 1
@@ -980,26 +1368,65 @@ def run(args: argparse.Namespace) -> None:
 
             console.print(f"  [dim]attempt {attempt}…[/dim]")
 
+            def _fail(reason: str) -> None:
+                """Increment counters and track consecutive same-reason runs."""
+                nonlocal total_fail, consecutive_same_reason, last_seen_reason
+                total_fail += 1
+                if reason == last_seen_reason:
+                    consecutive_same_reason += 1
+                else:
+                    consecutive_same_reason = 1
+                    last_seen_reason = reason
+
             # ── LLM call ─────────────────────────────────────────────
             user_prompt = build_user_prompt(cat)
             raw = call_llm(model, user_prompt)
             if raw is None:
-                total_fail += 1
+                _fail("llm-error")
+                if consecutive_same_reason >= _CONSEC_BAIL:
+                    console.print(f"  [warn]{_CONSEC_BAIL} consecutive '{last_seen_reason}' — skipping category.[/warn]")
+                    break
                 continue
 
             # ── JSON parse ────────────────────────────────────────────
             example = parse_example(raw)
             if example is None:
-                console.print(f"  [warn]JSON parse failed (attempt {attempt})[/warn]")
-                log_parse_failure(cat_name, attempt, model, raw)
-                total_fail += 1
+                reason = _last_reject_reason
+                console.print(f"  [warn]JSON parse failed (attempt {attempt})  [{reason}][/warn]")
+                log_parse_failure(cat_name, attempt, model, raw, reason=reason)
+                _fail(reason)
+                if consecutive_same_reason >= _CONSEC_BAIL:
+                    console.print(f"  [warn]{_CONSEC_BAIL} consecutive '{last_seen_reason}' — skipping category.[/warn]")
+                    break
                 continue
 
             fixed_code = _PYTHON_COMMENT.sub("", example.get("fixed_code", "")).strip()
             if not fixed_code:
                 console.print(f"  [warn]Empty fixed_code (attempt {attempt})[/warn]")
-                total_fail += 1
+                _fail("empty-fixed-code")
+                if consecutive_same_reason >= _CONSEC_BAIL:
+                    console.print(f"  [warn]{_CONSEC_BAIL} consecutive '{last_seen_reason}' — skipping category.[/warn]")
+                    break
                 continue
+
+            # ── Broken-code sanity check ──────────────────────────────
+            # For compile-error examples, verify broken_code actually fails
+            # to compile.  If it passes, the model hallucinated the error —
+            # reject cheaply before spending cargo time on fixed_code.
+            if example.get("error_code") == "compile-error":
+                broken_code = _PYTHON_COMMENT.sub("", example.get("broken_code", "")).strip()
+                if broken_code and check_broken_compiles(broken_code, example.get("crates", [])):
+                    console.print(
+                        f"  [warn]broken_code compiles cleanly (attempt {attempt}) "
+                        f"[broken-compiles][/warn]"
+                    )
+                    log_parse_failure(cat_name, attempt, model,
+                                      raw, reason="broken-compiles")
+                    _fail("broken-compiles")
+                    if consecutive_same_reason >= _CONSEC_BAIL:
+                        console.print(f"  [warn]{_CONSEC_BAIL} consecutive '{last_seen_reason}' — skipping category.[/warn]")
+                        break
+                    continue
 
             # ── Cargo validation ──────────────────────────────────────
             console.print(f"  [dim]Validating with cargo…[/dim]")
@@ -1015,7 +1442,10 @@ def run(args: argparse.Namespace) -> None:
                     cat_name, attempt, model,
                     raw, fixed_code, val["wrapped_code"], val["errors"],
                 )
-                total_fail += 1
+                _fail("cargo-check")
+                if consecutive_same_reason >= _CONSEC_BAIL:
+                    console.print(f"  [warn]{_CONSEC_BAIL} consecutive '{last_seen_reason}' — skipping category.[/warn]")
+                    break
                 continue
 
             # ── Build the output record ───────────────────────────────
@@ -1059,6 +1489,8 @@ def run(args: argparse.Namespace) -> None:
             write_example(out_path, record)
             generated_this_cat += 1
             total_ok           += 1
+            consecutive_same_reason = 0   # success resets the streak
+            last_seen_reason        = ""
 
             # ── Cooldown ──────────────────────────────────────────────
             if cooldown_every > 0 and total_ok % cooldown_every == 0:
