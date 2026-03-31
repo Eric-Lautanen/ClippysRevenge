@@ -175,7 +175,8 @@ Rules:
 - Never use placeholder or stub function bodies — every function must have a real, compilable implementation.
 - Only use stdlib APIs you are certain exist. Verify method names (e.g. VecDeque uses push_back, not push).
 - Vec, String, Option, Result are in the prelude — never import them with use.
-- If a function is generic over T, do not push or return concrete literals of a specific type."""
+- If a function is generic over T, do not push or return concrete literals of a specific type.
+- Never use # or # —let warnings stay. Broken code must fail for real reasons, not suppressed noise."""
 
 def build_user_prompt(cat: dict) -> str:
     parts = [
@@ -1032,7 +1033,9 @@ _TOP_LEVEL   = re.compile(
 )
 
 
-_PYTHON_COMMENT = re.compile(r"^#(?!\[)\s.*$", re.MULTILINE)
+_PYTHON_COMMENT  = re.compile(r"^#(?!\[)\s.*$", re.MULTILINE)
+_MISSING_DEBUG   = re.compile(r"E0277|doesn't implement `Debug`")
+_STRUCT_ENUM_DEF = re.compile(r"^(\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum)\s)", re.MULTILINE)
 
 
 def wrap_for_check(code: str) -> str:
@@ -1121,6 +1124,23 @@ def _detect_msrv(code: str) -> str:
     return f"{msrv[0]}.{msrv[1]}.{msrv[2]}"
 
 
+def _autopatch_debug(code: str) -> str:
+    """
+    Insert #[derive(Debug)] before every struct/enum definition that
+    doesn't already have Debug in a derive attribute on the preceding line.
+    """
+    lines = code.splitlines(keepends=True)
+    out: list[str] = []
+    for line in lines:
+        stripped = line.lstrip()
+        if _STRUCT_ENUM_DEF.match(line):
+            prev = out[-1].strip() if out else ""
+            if "Debug" not in prev:
+                out.append("#[derive(Debug)]\n")
+        out.append(line)
+    return "".join(out)
+
+
 def validate(fixed_code: str, declared_crates: list[str]) -> dict:
     """
     Create a temp cargo project, run check / clippy / fmt / msrv.
@@ -1176,8 +1196,24 @@ def validate(fixed_code: str, declared_crates: list[str]) -> dict:
         # ── cargo check ──────────────────────────────────────────────
         r = _run(["cargo", "check", "--quiet", "--color=never"], proj, env=cargo_env)
         if r.returncode != 0:
-            result["errors"] = [r.stderr.strip()]
-            return result  # no point continuing
+            # ── Auto-patch: insert #[derive(Debug)] for E0277 failures ──
+            if _MISSING_DEBUG.search(r.stderr):
+                patched = _autopatch_debug(wrapped)
+                if patched != wrapped:
+                    (src / "main.rs").write_text(patched, encoding="utf-8")
+                    r2 = _run(["cargo", "check", "--quiet", "--color=never"], proj, env=cargo_env)
+                    if r2.returncode == 0:
+                        wrapped = patched
+                        result["wrapped_code"] = wrapped
+                    else:
+                        result["errors"] = [r.stderr.strip()]
+                        return result
+                else:
+                    result["errors"] = [r.stderr.strip()]
+                    return result
+            else:
+                result["errors"] = [r.stderr.strip()]
+                return result
         result["build"] = True
 
         # ── cargo fmt --check ────────────────────────────────────────
