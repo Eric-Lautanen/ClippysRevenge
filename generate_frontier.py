@@ -81,7 +81,7 @@ signal.signal(signal.SIGINT, _handle_sigint)
 LM_BASE      = "http://localhost:1234"
 API_OAI      = f"{LM_BASE}/v1"
 API_V1       = f"{LM_BASE}/api/v1"
-TEMPERATURE  = 0.35
+TEMPERATURE  = 0.2
 MAX_TOKENS   = 8192
 REQ_TIMEOUT  = 240
 CTX_LENGTH   = 8192
@@ -171,7 +171,11 @@ Rules:
 - Both code fields must be complete Rust files (fn main or async fn main, all use stmts), edition 2021.
 - broken_code MUST fail to compile with the stated error — not a trivial typo.
 - fixed_code MUST differ from broken_code semantically, not just whitespace or comments.
-- No external crates. crates is always []."""
+- No external crates. crates is always [].
+- Never use placeholder or stub function bodies — every function must have a real, compilable implementation.
+- Only use stdlib APIs you are certain exist. Verify method names (e.g. VecDeque uses push_back, not push).
+- Vec, String, Option, Result are in the prelude — never import them with use.
+- If a function is generic over T, do not push or return concrete literals of a specific type."""
 
 def build_user_prompt(cat: dict) -> str:
     parts = [
