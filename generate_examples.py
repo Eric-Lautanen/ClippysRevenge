@@ -506,45 +506,69 @@ def get_loaded_model() -> Optional[str]:
 
 def load_model(model_id: str) -> Optional[str]:
     """
-    Ask LM Studio to load *model_id*.  Returns the instance_id on success,
-    None on failure.  Handles 409 Already Loaded gracefully.
+    Load model via lms CLI so --gpu max and --context-length are honoured.
+    Unloads any currently loaded models first to avoid stacking instances.
+    Returns model_id as the instance handle, or None on failure.
     """
+    # Always clear any loaded models first so we never stack instances
     try:
-        r = requests.post(
-            f"{API_V1}/models/load",
-            json={
-                "model":            model_id,
-                "context_length":   CTX_LENGTH,
-                "flash_attention":  True,
-                "echo_load_config": True,
-            },
+        subprocess.run(
+            ["lms", "unload", "--all"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+        )
+    except Exception:
+        pass  # Non-fatal — proceed with load regardless
+
+    try:
+        result = subprocess.run(
+            [
+                "lms", "load", model_id,
+                "--gpu",            "max",
+                "--context-length", str(CTX_LENGTH),
+                "--identifier",     model_id,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
             timeout=LOAD_TIMEOUT,
         )
-        if r.status_code == 409:
-            # Already loaded — fetch the instance_id from the running list
-            loaded = list_loaded_models()
-            for m in loaded:
-                if m.get("id") == model_id or model_id in m.get("id", ""):
-                    return m.get("instance_id") or m.get("id")
-            return model_id  # best-effort fallback
-        r.raise_for_status()
-        data = r.json()
-        return data.get("instance_id") or data.get("id") or model_id
+        if result.returncode == 0:
+            console.print(f"[ok]Model loaded via CLI (gpu=max, ctx={CTX_LENGTH})[/ok]")
+            return model_id
+        combined = (result.stdout + result.stderr).lower()
+        if "already" in combined:
+            console.print(f"[warn]Model already loaded — reusing.[/warn]")
+            return model_id
+        console.print(f"[fail]lms load failed: {result.stderr.strip()}[/fail]")
+        return None
+    except FileNotFoundError:
+        console.print("[fail]`lms` CLI not found — is it on your PATH?[/fail]")
+        return None
+    except subprocess.TimeoutExpired:
+        console.print("[fail]lms load timed out.[/fail]")
+        return None
     except Exception as e:
         console.print(f"[fail]load_model error: {e}[/fail]")
         return None
 
 
 def unload_model(instance_id: str) -> bool:
-    """Ask LM Studio to unload the model with the given instance_id."""
+    """Unload model via lms CLI."""
     try:
-        r = requests.post(
-            f"{API_V1}/models/unload",
-            json={"instance_id": instance_id},
+        result = subprocess.run(
+            ["lms", "unload", instance_id],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
             timeout=30,
         )
-        r.raise_for_status()
-        return True
+        if result.returncode == 0:
+            return True
+        console.print(f"[warn]lms unload warning: {result.stderr.strip()}[/warn]")
+        return False
     except Exception as e:
         console.print(f"[warn]unload_model error: {e}[/warn]")
         return False
