@@ -89,7 +89,8 @@ CTX_LENGTH   = 8192
 LOAD_TIMEOUT = 120
 EDITION      = "2021"
 LICENSE      = "Apache-2.0"
-MAX_FAILURES = 2          # skip a category after this many total failed attempts
+MAX_FAILURES     = 3   # skip a category after this many *consecutive* failures
+MAX_CAT_FAILURES = 15  # skip a category after this many *total* failures (never resets)
 SHARED_TARGET_DIR = Path(__file__).parent / "cargo_target"  # shared build cache
 
 # ─────────────────────────────────────────────────────────
@@ -154,50 +155,41 @@ CRATE_MAP: dict[str, str] = {
 # ─────────────────────────────────────────────────────────
 
 SYSTEM_PROMPT = """\
-You are a Rust expert generating training data. Output ONE raw JSON object. No markdown fences, no explanation, no text before or after — just the JSON object.
+You are a Rust expert generating training data. Output ONE raw JSON object. No markdown fences, no explanation — just the JSON.
 
-── OUTPUT FORMAT ────────────────────────────────────────────────────
+OUTPUT FORMAT:
 {
   "category": "Core - Ownership",
   "difficulty": "intermediate",
-  "prompt": "Why does this code fail to compile? The value seems to still be in scope.",
-  "broken_code": "fn main() {\\n    let s = String::from(\\"hello\\");\\n    let r = &s;\\n    drop(s);\\n    println!(\\"{}\\", r);\\n}",
-  "error_message": "error[E0505]: cannot move out of `s` because it is borrowed",
+  "prompt": "Why does this code fail to compile?",
+  "broken_code": "fn main() {\\n    let s = String::from(\\"hello\\");\\n    let t = s;\\n    println!(\\"{}\\", s);\\n}",
+  "error_message": "error[E0382]: borrow of moved value: `s`",
   "error_code": "compile-error",
-  "fixed_code": "fn main() {\\n    let s = String::from(\\"hello\\");\\n    let r = &s;\\n    println!(\\"{}\\", r);\\n}",
-  "explanation": "Calling drop(s) moves s while r still holds a borrow of it. Removing the drop allows r to be used safely before s is freed at end of scope.",
-  "concepts": ["ownership", "borrowing", "drop"],
+  "fixed_code": "fn main() {\\n    let s = String::from(\\"hello\\");\\n    let t = s.clone();\\n    println!(\\"{}\\", s);\\n}",
+  "explanation": "Moving s into t makes s unavailable. Cloning s before the move lets both variables be used.",
+  "concepts": ["ownership", "move semantics"],
   "crates": []
 }
 
-── CODE RULES ───────────────────────────────────────────────────────────
-- Both fields must be complete Rust files, edition 2021, with fn main (or async fn main) and all use statements.
-- No external crates — crates is always [].
-- Never use #![allow(...)] or #[allow(...)] — fix warnings properly.
-- Only use stdlib APIs you are certain exist (e.g. VecDeque::push_back not push).
-- Vec, String, Option, Result are in the prelude — do not import them.
-- Never use stub or placeholder bodies — every function must have a real implementation.
+COMPILE-ERROR RULE — MOST IMPORTANT:
+If error_code is "compile-error", broken_code MUST be rejected by rustc.
+Stick to simple, certain bugs: use-after-move, two &mut borrows, missing mut, type mismatch.
+If you are not 100% certain broken_code will fail to compile, use "logic-bug" instead.
+"logic-bug" is always safe: broken_code compiles but produces wrong output.
 
-── THE MOST IMPORTANT RULE ────────────────────────────────────────────
-broken_code and fixed_code MUST be different in a meaningful way.
-Do NOT copy the same code into both fields.
-fixed_code must contain the actual change that solves the problem.
-If you cannot think of a working fix, choose a different bug.
+CODE RULES:
+1. Both code fields must be complete Rust edition-2021 files with fn main and all use statements.
+2. crates is always []. No external dependencies.
+3. No #[allow(...)] or #![allow(...)]. Fix warnings properly.
+4. Only use stdlib APIs you are certain exist. Vec/String/Option/Result need no import.
+5. No stub bodies — every function needs a real implementation.
+6. broken_code and fixed_code MUST differ meaningfully. Never copy the same code into both.
 
-── BROKEN CODE RULES BY ERROR TYPE ───────────────────────────────────
-compile-error  → broken_code MUST fail to compile with the exact stated error.
-                 ONLY use this type for bugs you are 100% certain cause a compiler error.
-                 Prefer errors that are trivially reproducible in <30 lines of stdlib code:
-                   Ownership/moves:  E0382, E0505, E0507, E0509
-                   Borrow checker:   E0499, E0502, E0506, E0596
-                   Lifetimes:        E0106, E0597, E0515, E0716
-                   Type/traits:      E0277, E0308, E0282, E0369, E0004
-                   Async:            E0277 (Send), E0733
-                   Scope/imports:    E0412, E0425
-                 If unsure whether the code actually fails, use logic-bug or design-issue instead.
-runtime-panic  → broken_code MUST compile but panic at runtime (e.g. index out of bounds, unwrap on None).
-logic-bug      → broken_code MUST compile and run, but produce wrong output. fixed_code corrects the logic.
-design-issue   → broken_code MUST compile and run correctly, but is unidiomatic, unsafe, or fragile. fixed_code improves it."""
+ERROR TYPES:
+compile-error  → broken_code rejected by rustc. Only use when certain it will fail.
+runtime-panic  → broken_code compiles but panics at runtime.
+logic-bug      → broken_code compiles and runs but produces wrong output.
+design-issue   → broken_code works but is unidiomatic or fragile."""
 
 import random as _random
 
@@ -206,21 +198,6 @@ import random as _random
 # build_user_prompt produces a structurally different prompt.  The old approach
 # cycled personas in fixed order by attempt number, meaning attempt 9 was
 # identical to attempt 1.
-
-_PERSONAS: list[str] = [
-    "You are a senior Rust engineer reviewing a tricky bug reported by a colleague.",
-    "You are a Rust educator writing examples for an intermediate-level workshop.",
-    "You are a systems programmer who just hit this bug in production and needs a minimal repro.",
-    "You are a code reviewer who caught this mistake during a pull request review.",
-    "You are a Rust newcomer who wrote this code and is puzzled by the compiler error.",
-    "You are a technical writer crafting a debugging guide for common Rust pitfalls.",
-    "You are a compiler engineer illustrating how the borrow checker enforces ownership rules.",
-    "You are a developer porting C++ code to Rust and encountered this ownership issue.",
-    "You are a developer migrating a Python service to Rust and hit this issue.",
-    "You are a game developer learning Rust for performance-critical engine code.",
-    "You are a backend engineer who found this pattern in a code audit.",
-    "You are an interviewer preparing a realistic Rust coding challenge.",
-]
 
 # Angles push the model toward structurally different bugs each generation.
 # Compile-error angles name the specific Rust error code so the model has an
@@ -232,36 +209,25 @@ _PERSONAS: list[str] = [
 # lines of pure stdlib code and (b) have a clear, deterministic fix.  Errors
 # that require complex trait machinery or nightly features are excluded.
 _COMPILE_ERROR_ANGLES: list[str] = [
-    # ── Ownership & moves ────────────────────────────────────────────────────
-    "compile-error E0382: use of moved value — move a value into a function or binding, then try to use the original variable afterward.",
-    "compile-error E0505: cannot move out of a variable because it is borrowed — hold a live borrow of a value, then try to move or drop it.",
-    "compile-error E0507: cannot move out of a shared reference — try to move a field or value out of a &T reference.",
-    "compile-error E0509: cannot move out of type which implements the Drop trait — try to move a field out of a struct that implements Drop.",
+    # ── Ownership & moves (most reliable for small models) ──────────────────
+    "compile-error E0382: use of moved value — move a value into a binding or function call, then use the original variable afterward. SIMPLE: let t = s; println!(\"{}\", s);",
+    "compile-error E0505: cannot move out of borrowed value — hold a live shared borrow of a value, then try to move or drop the original. SIMPLE: let r = &s; drop(s);",
+    "compile-error E0596: cannot borrow as mutable, not declared as mutable — call a &mut method or take &mut on a variable declared without mut. SIMPLE: let v = Vec::new(); v.push(1);",
     # ── Borrow checker ───────────────────────────────────────────────────────
-    "compile-error E0499: cannot borrow as mutable more than once at a time — create two simultaneous &mut references to the same value.",
-    "compile-error E0502: cannot borrow as mutable because it is also borrowed as immutable — hold a & borrow then try to take a &mut borrow.",
-    "compile-error E0506: cannot assign to a variable because it is borrowed — assign to a variable while a reference to it is still live.",
-    "compile-error E0596: cannot borrow as mutable, as it is not declared as mutable — call a &mut method or take &mut on a variable declared without mut.",
+    "compile-error E0499: cannot borrow as mutable more than once — create two simultaneous &mut references to the same value. SIMPLE: let a = &mut v; let b = &mut v;",
+    "compile-error E0502: mutable borrow while immutably borrowed — hold a & borrow then take a &mut borrow of the same value. SIMPLE: let r = &v; let m = &mut v;",
+    "compile-error E0506: assign while borrowed — assign to a variable while a reference to it is still live. SIMPLE: let r = &x; x = 5;",
     # ── Lifetimes ────────────────────────────────────────────────────────────
-    "compile-error E0106: missing lifetime specifier — define a struct or function that holds a reference without the required lifetime annotation.",
-    "compile-error E0597: value does not live long enough — return or store a reference to a local variable that is dropped before the reference is used.",
-    "compile-error E0515: cannot return reference to local data — return a reference to data owned by the current function.",
-    "compile-error E0716: temporary value dropped while borrowed — take a reference to a temporary expression; the temporary is dropped at the end of the statement.",
-    "compile-error E0521: borrowed data escapes outside of a closure — a closure returns or stores a reference to data from its enclosing scope in a way that outlives the borrow.",
+    "compile-error E0106: missing lifetime specifier — define a struct that holds a reference field without a lifetime annotation. SIMPLE: struct Foo { val: &str }",
+    "compile-error E0515: cannot return reference to local data — return a reference to a variable owned by the current function. SIMPLE: fn f() -> &str { let s = String::from(\"x\"); &s }",
+    "compile-error E0597: value does not live long enough — store a reference to a local that is dropped before the reference is used. SIMPLE: let r; { let x = 5; r = &x; } println!(\"{}\", r);",
     # ── Type system & traits ─────────────────────────────────────────────────
-    "compile-error E0277: trait bound not satisfied — pass a type to a generic function that requires a trait the type does not implement (e.g. missing Clone, Display, or Send).",
-    "compile-error E0308: type mismatch — return or assign a value of the wrong type where the expected type is unambiguous (e.g. returning i32 where &str is expected).",
-    "compile-error E0282: type annotations needed — write an expression where the compiler cannot infer the type without an explicit annotation.",
-    "compile-error E0369: binary operation cannot be applied — use +, -, ==, or < on a custom type that does not implement the corresponding std trait (Add, PartialEq, PartialOrd).",
-    "compile-error E0004: non-exhaustive patterns in match — write a match expression that is missing one or more variants of an enum.",
-    "compile-error E0207: type parameter is not constrained by the impl — add a type parameter to an impl block that does not appear in the implementing type or trait.",
-    # ── Async ────────────────────────────────────────────────────────────────
-    "compile-error E0277 (Send bound): spawn a future on tokio::spawn that holds a non-Send value (e.g. Rc or a raw pointer) across an await point.",
-    "compile-error E0728: thread-local cannot be used in an async fn — access a thread_local! variable across an await point inside an async function.",
-    "compile-error E0733: recursion in an async fn requires boxing — write a directly recursive async fn without boxing the return type.",
+    "compile-error E0308: type mismatch — return or assign a value of the wrong concrete type. SIMPLE: fn f() -> String { 42 }",
+    "compile-error E0369: binary operation not supported — use + or == on a custom struct that does not implement Add or PartialEq. SIMPLE: struct Point{x:i32,y:i32}; let _=p1+p2;",
+    "compile-error E0004: non-exhaustive match — write a match on an enum that is missing one or more variants. SIMPLE: enum Dir{N,S,E,W} match d { Dir::N=>1, Dir::S=>2 }",
     # ── Imports & scope ──────────────────────────────────────────────────────
-    "compile-error E0412: cannot find type in this scope — use a type name without the required use statement or without the correct module path.",
-    "compile-error E0425: cannot find value in this scope — call a function or reference a variable that has not been imported or defined.",
+    "compile-error E0412: type not in scope — use a type that requires a use statement without importing it. SIMPLE: let d: HashMap<_,_> = HashMap::new(); (without use std::collections::HashMap)",
+    "compile-error E0425: value not in scope — call a function or reference a variable that has not been defined or imported.",
 ]
 
 _OTHER_ERROR_ANGLES: list[str] = [
@@ -293,31 +259,20 @@ _OTHER_ERROR_ANGLES: list[str] = [
 # the extra prompting they need to be generated correctly.
 _ERROR_ANGLES: list[str] = _COMPILE_ERROR_ANGLES * 2 + _OTHER_ERROR_ANGLES
 
-# Code shape hints force structural variety in the generated examples.
+# Code shape hints force structural variety. Async/threading shapes are excluded
+# because they require external crates (tokio) which the system prompt forbids.
 _CODE_SHAPES: list[str] = [
-    "Use a struct with multiple fields to demonstrate the issue.",
-    "Show the bug inside an iterator chain or closure.",
-    "Use a function that takes and returns references.",
+    "Use a struct with named fields to demonstrate the issue.",
+    "Show the bug inside a closure or iterator chain.",
+    "Use a function that takes a reference parameter.",
     "Demonstrate the issue across two separate functions.",
     "Use a Vec or HashMap as the primary data structure.",
-    "Show the bug inside an async fn with await points.",
     "Use an enum with multiple variants to drive the logic.",
-    "Use a trait implementation to surface the problem.",
+    "Use a trait and an impl block to surface the problem.",
     "Show the bug inside a loop or recursive function.",
-    "Use a nested struct or enum to expose the issue.",
-    "Show the bug in a generic function with type parameters.",
-    "Demonstrate the issue in a multi-threaded context using threads or channels.",
+    "Use a generic function with a type parameter.",
+    "Use a nested struct to expose the issue.",
 ]
-
-# Varied phrasings for the final instruction line.
-_REQUEST_PHRASINGS: list[str] = [
-    "Generate ONE realistic broken \u2192 fixed example in the required JSON format.",
-    "Produce ONE concrete broken \u2192 fixed pair in the required JSON format.",
-    "Write ONE authentic broken \u2192 fixed example following the JSON schema exactly.",
-    "Create ONE realistic example with a genuine bug and its correct fix, as JSON.",
-    "Output ONE broken \u2192 fixed training example in the required JSON format.",
-]
-
 
 def build_user_prompt(
     cat: dict,
@@ -337,13 +292,12 @@ def build_user_prompt(
     #  - The sequence is reproducible for debugging.
     rng = _random.Random(attempt * 9973 + (hash(cat.get("category", "")) & 0xFFFFFFFF))
 
-    persona      = rng.choice(_PERSONAS)
-    error_angle  = rng.choice(_ERROR_ANGLES)
-    code_shape   = rng.choice(_CODE_SHAPES)
-    request_line = rng.choice(_REQUEST_PHRASINGS)
+    error_angle = rng.choice(_ERROR_ANGLES)
+    code_shape  = rng.choice(_CODE_SHAPES)
+
+    is_compile_error = error_angle.startswith("compile-error")
 
     parts = [
-        persona,
         f'Category: "{cat["category"]}"',
         f'Focus: {cat.get("prompt_focus", cat.get("description", ""))}',
         f'Difficulty: {cat["difficulty"]}',
@@ -353,17 +307,27 @@ def build_user_prompt(
         parts.append(f'Tags: {", ".join(tags)}')
 
     parts.append(f'Error angle: {error_angle}')
-    parts.append(f'Code shape:  {code_shape}')
+    parts.append(f'Code shape: {code_shape}')
 
-    if correction_hint:
-        parts.append(f'\nIMPORTANT — previous attempt failed: {correction_hint}')
+    # For compile-error angles, add an explicit inline reminder so the model
+    # cannot miss the requirement even if it skimmed the system prompt.
+    if is_compile_error:
         parts.append(
-            "Do NOT repeat that mistake. "
-            "If you cannot produce broken_code that genuinely fails to compile, "
-            "switch to error_code \"logic-bug\" or \"design-issue\" instead."
+            "\nREMINDER: error_code is compile-error. "
+            "broken_code MUST be rejected by rustc with the stated error. "
+            "Keep the bug small and obvious. "
+            "If you are not 100% sure it will fail to compile, use logic-bug instead."
         )
 
-    parts.append(f'\n{request_line}')
+    if correction_hint:
+        parts.append(f'\nPREVIOUS ATTEMPT FAILED: {correction_hint}')
+        parts.append(
+            "Do NOT repeat that mistake. "
+            "Switch to error_code \"logic-bug\" or \"design-issue\" if you cannot "
+            "produce broken_code that is guaranteed to fail compilation."
+        )
+
+    parts.append('\nOutput the JSON object now.')
     return "\n".join(parts)
 
 
@@ -1262,14 +1226,22 @@ def wrap_for_check(code: str) -> str:
 # ─────────────────────────────────────────────────────────
 
 def _run(cmd: list[str], cwd: Path, timeout: int = 120, env: dict | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        cmd,
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env,
-    )
+    try:
+        return subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        # Process is killed by subprocess.run before re-raising; return a
+        # synthetic failed result so callers never see an unhandled exception.
+        return subprocess.CompletedProcess(
+            cmd, returncode=-1, stdout="",
+            stderr=f"[timeout: command exceeded {timeout}s]",
+        )
 
 
 def _detect_msrv(code: str) -> str:
@@ -1705,6 +1677,7 @@ def run(args: argparse.Namespace) -> None:
         generated_this_cat = 0
         attempt = 0
         consecutive_failures = 0
+        total_cat_fail       = 0   # total failures this category — never resets on success
         # broken-compiles failures are tracked separately — they don't count
         # toward the shared MAX_FAILURES limit because they are a model quality
         # issue (hallucinated error), not a structural problem with the category.
@@ -1719,15 +1692,26 @@ def run(args: argparse.Namespace) -> None:
 
             def _fail(reason: str) -> None:
                 """Increment fail counters; caller checks consecutive_failures to bail."""
-                nonlocal total_fail, consecutive_failures
+                nonlocal total_fail, consecutive_failures, total_cat_fail
                 total_fail += 1
                 consecutive_failures += 1
+                total_cat_fail += 1
+                console.print(
+                    f"  [dim]↳ run total: [ok]{total_ok}[/ok] ok  "
+                    f"[fail]{total_fail}[/fail] failed[/dim]"
+                )
 
             def _bail_if_stuck() -> bool:
-                """Return True (and print a warning) when the failure streak hits the cap."""
+                """Return True (and print a warning) when either failure limit is hit."""
                 if consecutive_failures >= MAX_FAILURES:
                     console.print(
-                        f"  [warn]{MAX_FAILURES} failures — "
+                        f"  [warn]{MAX_FAILURES} consecutive failures — "
+                        f"skipping category.[/warn]"
+                    )
+                    return True
+                if total_cat_fail >= MAX_CAT_FAILURES:
+                    console.print(
+                        f"  [warn]{MAX_CAT_FAILURES} total failures this category — "
                         f"skipping category.[/warn]"
                     )
                     return True
@@ -1781,6 +1765,11 @@ def run(args: argparse.Namespace) -> None:
                                       raw, reason="broken-compiles")
                     broken_compiles_streak += 1
                     total_fail += 1
+                    total_cat_fail += 1
+                    console.print(
+                        f"  [dim]↳ run total: [ok]{total_ok}[/ok] ok  "
+                        f"[fail]{total_fail}[/fail] failed[/dim]"
+                    )
                     # Build a correction hint so the next prompt knows what went wrong.
                     stated_error = example.get("error_message", "").strip()
                     correction_hint = (
@@ -1795,11 +1784,18 @@ def run(args: argparse.Namespace) -> None:
                             f"skipping category.[/warn]"
                         )
                         break
+                    if _bail_if_stuck(): break
                     continue
 
             # ── Cargo validation ──────────────────────────────────────
             console.print(f"  [dim]Validating with cargo…[/dim]")
-            val = validate(fixed_code, example.get("crates", []))
+            try:
+                val = validate(fixed_code, example.get("crates", []))
+            except Exception as e:
+                console.print(f"  [fail]✗ validate() crashed (attempt {attempt}): {e}[/fail]")
+                _fail("validate-crash")
+                if _bail_if_stuck(): break
+                continue
 
             if not val["build"]:
                 err_preview = val["errors"][0][:120] if val["errors"] else "unknown"
@@ -1863,6 +1859,9 @@ def run(args: argparse.Namespace) -> None:
             total_ok            += 1
             broken_compiles_streak = 0  # reset on any successful generation
             consecutive_failures   = 0  # successful example clears the streak
+            # total_cat_fail is intentionally NOT reset — it is a hard budget
+            # for the whole category so a model that barely scrapes by can't
+            # loop forever on a category it has little knowledge of.
             # ── Cooldown ──────────────────────────────────────────────
             if cooldown_every > 0 and total_ok % cooldown_every == 0:
                 console.print(
@@ -1870,6 +1869,7 @@ def run(args: argparse.Namespace) -> None:
                     f"unloading model for {cooldown_secs}s…[/warn]"
                 )
                 unload_model(instance_id)
+                _active_iid = None   # clear immediately so signal handler won't try a ghost unload
                 for remaining_s in range(cooldown_secs, 0, -5):
                     console.print(f"  [dim]{remaining_s}s remaining…[/dim]", end="\r")
                     time.sleep(min(5, remaining_s))
@@ -1878,6 +1878,10 @@ def run(args: argparse.Namespace) -> None:
                 if new_iid:
                     instance_id = new_iid
                     _active_iid = new_iid
+                else:
+                    # Load failed — keep running with the existing model id but
+                    # leave _active_iid as None so we don't try to unload a ghost.
+                    console.print(f"[warn]Model reload failed — continuing without reloading.[/warn]")
                 console.print(f"[ok]Cooldown done. Resuming.[/ok]" + " " * 20)
 
             clippy_badge = "[ok]✓ clippy[/ok]" if val["clippy"] else "[warn]~ clippy warn[/warn]"
@@ -1887,6 +1891,8 @@ def run(args: argparse.Namespace) -> None:
                 f"  [ok]✓ build[/ok]  {clippy_badge}  {fmt_badge}"
                 f"{msrv_info}"
                 f"  [dim]{cat_name} #{existing + generated_this_cat}[/dim]"
+                f"  [dim]↳ run total: [ok]{total_ok}[/ok] ok  "
+                f"[fail]{total_fail}[/fail] failed[/dim]"
             )
 
         console.print()
