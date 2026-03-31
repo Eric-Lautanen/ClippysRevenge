@@ -15,6 +15,7 @@ Usage:
     python generate_frontier.py --model "model-id" --category "Core - Move Semantics on Function Call"
     python generate_frontier.py --model "model-id" --cooldown-every 50 --cooldown-secs 60
     python generate_frontier.py --categories rust_categories.jsonl --output-dir datasets/local
+    python generate_frontier.py --model "tesslate_tessa-rust-t1-7b" --categories rust_categories.jsonl --output-dir datasets/local
 """
 
 from __future__ import annotations
