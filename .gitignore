@@ -1,5 +1,7 @@
 # Generated data — can be gigabytes, never commit
 data/prepared/
+data/convos/.hashes/
+data/examples/.hashes/
 backup/
 rust_data/
 validated/
