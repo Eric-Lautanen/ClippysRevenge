@@ -31,7 +31,7 @@ from pathlib import Path
 from threading import Event
 from typing import Callable, Optional
 
-import requests
+import requests  # type: ignore[import-untyped]
 from rich import box
 from rich.console import Console
 from rich.table import Table

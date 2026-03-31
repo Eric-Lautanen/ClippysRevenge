@@ -34,7 +34,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-import requests
+import requests  # type: ignore[import-untyped]
 from rich.console import Console
 from rich.theme import Theme
 
