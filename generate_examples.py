@@ -148,6 +148,19 @@ CRATE_MAP: dict[str, str] = {
     "chrono":             'chrono = "0.4"',
     "uuid":               'uuid = { version = "1", features = ["v4"] }',
     "libc":               'libc = "0.2"',
+    # ── Additional crates required by specific categories ──────────────────
+    "walkdir":            'walkdir = "2"',
+    "tempfile":           'tempfile = "3"',
+    "smallvec":           'smallvec = { version = "1", features = ["union"] }',
+    "arrayvec":           'arrayvec = "0.7"',
+    "bumpalo":            'bumpalo = { version = "3", features = ["collections"] }',
+    "smolstr":            'smolstr = "0.2"',
+    "compact_str":        'compact_str = "0.8"',
+    "unicode_segmentation": 'unicode-segmentation = "1"',
+    "miette":             'miette = { version = "5", features = ["fancy"] }',
+    "eyre":               'eyre = "0.6"',
+    "color_eyre":         'color-eyre = "0.6"',
+    "itertools":          'itertools = "0.13"',
 }
 
 # ─────────────────────────────────────────────────────────
@@ -179,11 +192,12 @@ If you are not 100% certain broken_code will fail to compile, use "logic-bug" in
 
 CODE RULES:
 1. Both code fields must be complete Rust edition-2021 files with fn main and all use statements.
-2. crates is always []. No external dependencies.
+2. Only use the crates listed in the user prompt. If none are listed, crates: [].
 3. No #[allow(...)] or #![allow(...)]. Fix warnings properly.
 4. Only use stdlib APIs you are certain exist. Vec/String/Option/Result need no import.
 5. No stub bodies — every function needs a real implementation.
 6. broken_code and fixed_code MUST differ meaningfully. Never copy the same code into both.
+7. fixed_code must be idiomatic Rust — not just correct, but written the way an experienced Rust developer would write it.
 
 ERROR TYPES:
 compile-error  → broken_code rejected by rustc. Only use when certain it will fail.
@@ -274,6 +288,120 @@ _CODE_SHAPES: list[str] = [
     "Use a nested struct to expose the issue.",
 ]
 
+# ── Category → required crates ────────────────────────────────────────────────
+# Maps tag names (lowercased, hyphens stripped) to CRATE_MAP keys.
+# Built from the tags field so it stays in sync with whatever tags exist.
+_TAG_TO_CRATE: dict[str, str] = {
+    "thiserror":            "thiserror",
+    "anyhow":               "anyhow",
+    "regex":                "regex",
+    "indexmap":             "indexmap",
+    "dashmap":              "dashmap",
+    "serde":                "serde",
+    "serde_json":           "serde_json",
+    "rayon":                "rayon",
+    "rand":                 "rand",
+    "chrono":               "chrono",
+    "uuid":                 "uuid",
+    "clap":                 "clap",
+    "tracing":              "tracing",
+    "arena":                "typed_arena",
+    "bumpalo":              "bumpalo",
+    "walkdir":              "walkdir",
+    "tempfile":             "tempfile",
+    "smolstr":              "smolstr",
+    "compactstring":        "compact_str",   # tag is "CompactString"
+    "smallvec":             "smallvec",
+    "arrayvec":             "arrayvec",
+    "miette":               "miette",
+    "eyre":                 "eyre",
+    "coloreyre":            "color_eyre",    # tag is "color-eyre"
+    "itertools":            "itertools",
+    "unicodesegmentation":  "unicode_segmentation",
+}
+
+
+def _crates_for_category(cat: dict) -> list[str]:
+    """
+    Return the external crate names this category's examples should use,
+    derived from the category's tags. Only returns crates present in CRATE_MAP.
+    """
+    found: list[str] = []
+    seen: set[str] = set()
+    for tag in cat.get("tags", []):
+        key = tag.lower().replace("-", "").replace("_", "")
+        crate = _TAG_TO_CRATE.get(key)
+        if crate and crate not in seen and crate in CRATE_MAP:
+            found.append(crate)
+            seen.add(crate)
+    return found
+
+
+# ── Category-aware error angle selection ─────────────────────────────────────
+
+# Angles that work well for design/idiom categories
+_DESIGN_ANGLES: list[str] = [a for a in _OTHER_ERROR_ANGLES if "design-issue" in a]
+# Angles safe for beginner difficulty (simple, unambiguous ownership/borrow errors)
+_BEGINNER_COMPILE_ANGLES: list[str] = _COMPILE_ERROR_ANGLES[:6]
+# Angles safe for beginner difficulty (simple panics and logic bugs)
+_BEGINNER_OTHER_ANGLES: list[str] = _OTHER_ERROR_ANGLES[:6]
+
+
+def _error_angle_for_category(cat: dict, rng: _random.Random) -> str:
+    """
+    Return an error angle appropriate for this category's difficulty and domain.
+
+    Rules (in priority order):
+    1. unsafe/ffi tags → never compile-error (unsafe bypasses borrow checker)
+    2. Crate-focused categories → design-issue/logic-bug (the example must demo the crate API)
+    3. performance/optimization/idiom/allocation tags → strongly bias design-issue
+    4. advanced difficulty → de-emphasize compile-error (harder for small models)
+    5. beginner difficulty → only simple ownership/borrow errors + basic panics
+    6. Otherwise → full weighted pool (compile-error 2:1 over others)
+    """
+    tags = {t.lower().replace("-", "") for t in cat.get("tags", [])}
+    difficulty = cat.get("difficulty", "intermediate")
+
+    if tags & {"unsafe", "ffi"}:
+        return rng.choice(_OTHER_ERROR_ANGLES)
+
+    # If this category is about a specific external crate, the example needs to
+    # demonstrate that crate's API — a borrow-checker compile-error angle would
+    # produce an example that ignores the crate entirely.
+    if _crates_for_category(cat):
+        return rng.choice(_DESIGN_ANGLES * 2 + _OTHER_ERROR_ANGLES)
+
+    design_tags = {"performance", "optimization", "allocation", "zerocopy",
+                   "idioms", "binarysize", "noalloc"}
+    if tags & design_tags:
+        return rng.choice(_DESIGN_ANGLES * 3 + _OTHER_ERROR_ANGLES)
+
+    if difficulty == "advanced":
+        # compile-error 1:2 vs others (flipped from default)
+        return rng.choice(_COMPILE_ERROR_ANGLES + _OTHER_ERROR_ANGLES * 2)
+
+    if difficulty == "beginner":
+        return rng.choice(_BEGINNER_COMPILE_ANGLES * 2 + _BEGINNER_OTHER_ANGLES)
+
+    return rng.choice(_ERROR_ANGLES)  # full weighted pool
+
+
+# ── gen_type → prompt style hint ─────────────────────────────────────────────
+
+_GEN_TYPE_HINTS: dict[str, str] = {
+    "lecture": (
+        "Prompt style: phrase the prompt field as a teaching question — "
+        "e.g. 'How do you...?', 'What is the idiomatic way to...?', "
+        "'When should you use X instead of Y?'"
+    ),
+    "convo": (
+        "Prompt style: phrase the prompt field as a debugging question — "
+        "e.g. 'Why does this fail to compile?', "
+        "'Why does this produce the wrong output?', 'What is wrong here?'"
+    ),
+}
+
+
 def build_user_prompt(
     cat: dict,
     attempt: int = 1,
@@ -292,25 +420,51 @@ def build_user_prompt(
     #  - The sequence is reproducible for debugging.
     rng = _random.Random(attempt * 9973 + (hash(cat.get("category", "")) & 0xFFFFFFFF))
 
-    error_angle = rng.choice(_ERROR_ANGLES)
-    code_shape  = rng.choice(_CODE_SHAPES)
+    error_angle  = _error_angle_for_category(cat, rng)
+    code_shape   = rng.choice(_CODE_SHAPES)
 
     is_compile_error = error_angle.startswith("compile-error")
+    cat_crates   = _crates_for_category(cat)
+    gen_type     = cat.get("gen_type", "both")
+    prompt_focus = cat.get("prompt_focus", cat.get("description", ""))
 
     parts = [
         f'Category: "{cat["category"]}"',
-        f'Focus: {cat.get("prompt_focus", cat.get("description", ""))}',
         f'Difficulty: {cat["difficulty"]}',
+        f'Concepts to demonstrate: {prompt_focus}',
     ]
+
     tags = cat.get("tags", [])
     if tags:
         parts.append(f'Tags: {", ".join(tags)}')
 
+    # ── Crate guidance ────────────────────────────────────────────────────
+    if cat_crates:
+        crate_json = "[" + ", ".join(f'"{c}"' for c in cat_crates) + "]"
+        parts.append(
+            f'Required crates: {", ".join(cat_crates)}. '
+            f'Set "crates": {crate_json} and import/use these crates in both code fields.'
+        )
+    else:
+        parts.append('No external crates. Set "crates": [].')
+
+    # ── Prompt style from gen_type ────────────────────────────────────────
+    gen_hint = _GEN_TYPE_HINTS.get(gen_type, "")
+    if gen_hint:
+        parts.append(gen_hint)
+
+    # ── Error angle and code shape ────────────────────────────────────────
     parts.append(f'Error angle: {error_angle}')
     parts.append(f'Code shape: {code_shape}')
 
-    # For compile-error angles, add an explicit inline reminder so the model
-    # cannot miss the requirement even if it skimmed the system prompt.
+    # ── Core requirement: must use concepts from prompt_focus ─────────────
+    parts.append(
+        'REQUIREMENT: The example MUST directly use a specific API, method, '
+        'or pattern named in "Concepts to demonstrate" above. '
+        'A generic example that ignores the category focus is wrong.'
+    )
+
+    # ── Compile-error inline reminder ─────────────────────────────────────
     if is_compile_error:
         parts.append(
             "\nREMINDER: error_code is compile-error. "
@@ -322,7 +476,6 @@ def build_user_prompt(
     if correction_hint:
         parts.append(f'\nPREVIOUS ATTEMPT FAILED: {correction_hint}')
         parts.append(
-            "Do NOT repeat that mistake. "
             "Switch to error_code \"logic-bug\" or \"design-issue\" if you cannot "
             "produce broken_code that is guaranteed to fail compilation."
         )
