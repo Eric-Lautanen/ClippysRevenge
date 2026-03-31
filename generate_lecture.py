@@ -11,8 +11,8 @@ Each record is one authoritative, in-depth explanation by the assistant.
 Usage (PowerShell — all one line):
     python generate_lecture.py generate --models "qwen3.5-4b@q3_k_m" "qwen3.5-4b@q3_k_m" --count 5000 --rotate-every 50 --output-dir ./data/lectures
 
-    python generate_lecture.py stats  --output-dir ./convos/lectures
-    python generate_lecture.py sample --output-dir ./convos/lectures
+    python generate_lecture.py stats  --output-dir ./data/lectures
+    python generate_lecture.py sample --output-dir ./data/lectures
 
 Requirements:
     pip install requests rich

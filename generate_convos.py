@@ -6,9 +6,9 @@
 ╚══════════════════════════════════════════════════════════╝
 
 Usage (PowerShell — all one line):
-python generate.py generate --models "qwen3.5-4b@q3_k_m" "qwen3.5-4b@q3_k_m" "qwen3.5-4b@q3_k_m" --count 50000 --rotate-every 50 --output-dir ./convos/rust
-    python generate.py stats  --output-dir ./convos
-    python generate.py sample --output-dir ./convos --category rust_ownership
+python generate_convos.py generate --models "qwen3.5-4b@q3_k_m" "qwen3.5-4b@q3_k_m" "qwen3.5-4b@q3_k_m" --count 50000 --rotate-every 50 --output-dir ./data/convos
+    python generate_convos.py stats  --output-dir ./data/convos
+    python generate_convos.py sample --output-dir ./data/convos --category rust_ownership
 
 Requirements:
     pip install requests rich
