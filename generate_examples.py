@@ -1232,6 +1232,11 @@ def parse_example(text: str) -> Optional[dict]:
     global _last_reject_reason
     _last_reject_reason = "json-parse"   # default if we can't even extract JSON
 
+    # Normalise raw LLM output before any extraction or repair attempt:
+    # strips BOM, removes null bytes, normalises \r\n / \r → \n so that
+    # _apply_escapes sees a consistent newline character inside strings.
+    text = _preprocess(text)
+
     data: Optional[dict] = None
 
     for candidate in _extract_json_candidates(text):
