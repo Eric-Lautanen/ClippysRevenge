@@ -240,57 +240,23 @@ CRATE_MAP: dict[str, str] = {
 #  LLM PROMPTS
 # ─────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a RUST expert. Output ONE raw JSON object. No markdown fences, no explanation — just the JSON.
+SYSTEM_PROMPT = """You are a Rust expert data generator. Your ONLY output must be a single, raw JSON object. Do not include markdown formatting, code fences (```), or any conversational text.
 
-OUTPUT FORMAT:
+OUTPUT SCHEMA:
 {
-  "category": "Category here",
+  "category": "Broad topic (e.g., File I/O, Data Structures)",
   "difficulty": "beginner|intermediate|advanced",
-  "prompt": "The plain-English request being answered",
-  "code": "Complete Rust code here",
-  "explanation": "Why the code is written this way — for training context only",
-  "concepts": ["list", "of", "concepts"],
-  "crates": []
+  "prompt": "Max 2 sentences. Write as a non-Rust programmer Googling a generic problem. Use plain English. (Example: 'I need to group items by their name' instead of 'How do I use a HashMap').",
+  "code": "Complete, working Rust 2021 code. 15-50 lines. Must include fn main().",
+  "explanation": "Brief reasoning for why this code is idiomatic.",
+  "concepts": ["concept1", "concept2"],
+  "crates": ["crate_name"] // Leave empty if stdlib only
 }
 
-PROMPT FIELD RULES — CRITICAL:
-The prompt field simulates what a non-Rust programmer would type. It must sound like plain English from someone who has never used Rust, does not know Rust terminology, and just wants something to work. Maximum 2 sentences.
-
-Pick ONE framing per example. Rotate across all of them:
-
-  PLAIN TASK    — just says what they want built or done, no jargon
-  PROBLEM       — describes a real-world situation they want to solve in code
-  FIX IT        — describes behaviour that is wrong and asks to make it right
-  HOW TO        — asks how to do a common programming task without Rust terms
-  MAKE IT WORK  — gives a vague goal and trusts the model to figure out the details
-  COMPARISON    — asks which of two plain-English approaches is better
-  CONVERT       — asks to turn one kind of data into another in plain terms
-
-Rules:
-- 1 to 2 sentences. Never more.
-- NO Rust terminology in the prompt field: no "trait", "borrow", "lifetime", "ownership", "impl",
-  "enum", "match", "Result", "Option", "closure", "iterator", "derive", "unsafe", "async",
-  "Arc", "Mutex", "Vec", "HashMap", or any other Rust-specific word.
-- Write as if the person Googled their problem or asked a colleague. Natural, direct, outcome-focused.
-- Vary the opening. Do not start consecutive prompts with "I".
-- Bad: "Show me how to use the Iterator trait to transform a Vec<T>"  ← Rust jargon
-- Bad: "Write an idiomatic implementation using pattern matching"      ← Rust jargon
-- Bad: "How do I impl Display for my custom type?"                    ← Rust jargon
-- Good: "I have a list of numbers and want to double each one"
-- Good: "How do I make my program read a file and print each line?"
-- Good: "I want to store a bunch of key-value pairs and look them up by name"
-- Good: "My program crashes when a value is missing — how do I handle that gracefully?"
-
-CODE RULES:
-1. code must be a complete Rust edition-2021 file with fn main and all use statements.
-2. Keep code SHORT and FOCUSED — 15 to 50 lines is the target. Do not write full applications.
-   One or two small functions plus a fn main that exercises them is the right scope.
-3. Only use the crates listed in the user prompt. If none are listed, crates: [].
-4. No #[allow(...)] or #![allow(...)]. Fix warnings properly.
-5. Only use stdlib APIs you are certain exist. Vec/String/Option/Result need no import.
-6. No stub bodies — every function needs a real implementation.
-7. code must be correct and idiomatic — clear, clean, and focused on demonstrating one concept well.
-8. No comments of any kind — no // line comments, no /* block comments */, no //! or /// doc comments."""
+STRICT CODE RULES:
+1. NO COMMENTS ALLOWED: The "code" string must contain zero comments. Remove all //, /*, ///, and //!.
+2. MUST COMPILE: Code must be idiomatic, complete, and warning-free. Do not use #[allow(...)].
+3. COMPLETE: Include all necessary `use` statements. No stubbed functions."""
 
 SYSTEM_PROMPT_FIX = """\
 You are a Rust compiler expert. Your only job is to fix broken Rust code.
@@ -309,55 +275,55 @@ OUTPUT RULES — follow these exactly:
 # does not need to appear in the prompt sent to the model.
 
 _USER_PROMPTS: list[str] = [
-    # 1 — plain outcome: someone just wants a thing to work
-    'For the Rust concept "{category}", write working code. '
-    'The prompt field must sound like a non-programmer describing what they want in plain English — '
-    'no Rust terms, no jargon, just the goal. The explanation is internal context for training only.',
+    # 1 — Plain outcome
+    "TOPIC: {category}\n\n"
+    "TASK: For the JSON 'prompt' field, act like a non-programmer who just wants a simple outcome. "
+    "Use plain English. Zero Rust jargon. Just state the goal.",
 
-    # 2 — everyday problem framing
-    'Write Rust code for "{category}". '
-    'The prompt field should describe a real, everyday situation a normal person would recognise — '
-    'like reading a file, processing a list, or handling missing data. No Rust terminology.',
+    # 2 — Everyday problem
+    "TOPIC: {category}\n\n"
+    "TASK: For the JSON 'prompt' field, describe a real-world, everyday situation a normal person "
+    "would recognize (like reading files or formatting text). No Rust terminology.",
 
-    # 3 — something went wrong
-    'Write Rust code for "{category}". '
-    'The prompt field should describe a problem the user is experiencing in plain terms — '
-    'something that is broken, crashing, or not behaving as expected. No Rust jargon.',
+    # 3 — Fix it
+    "TOPIC: {category}\n\n"
+    "TASK: For the JSON 'prompt' field, complain about something being broken, crashing, or acting weird. "
+    "Ask for a fix in plain English without using any Rust jargon.",
 
     # 4 — I want to build something
-    'Write Rust code for "{category}". '
-    'The prompt field should be phrased as someone describing what they want to build or accomplish, '
-    'in the same way they would describe it to a friend who writes code. No technical Rust terms.',
+    "TOPIC: {category}\n\n"
+    "TASK: For the JSON 'prompt' field, describe a small tool or feature you want to build. "
+    "Explain it like you are talking to a friend. Zero technical Rust terms.",
 
-    # 5 — I have data, I want a result
-    'Write Rust code for "{category}". '
-    'The prompt field should describe a data transformation or calculation in plain English — '
-    'what goes in, what should come out. No mention of types, traits, or Rust-specific concepts.',
+    # 5 — Data in, data out
+    "TOPIC: {category}\n\n"
+    "TASK: For the JSON 'prompt' field, describe a data calculation in plain English. "
+    "State what goes in and what should come out. Do not mention types or traits.",
 
-    # 6 — make it faster / safer / simpler
-    'Write Rust code for "{category}". '
-    'The prompt field should describe a practical concern: making something faster, preventing a crash, '
-    'or simplifying repetitive logic — in plain English without any Rust vocabulary.',
+    # 6 — Make it faster / safer / simpler
+    "TOPIC: {category}\n\n"
+    "TASK: For the JSON 'prompt' field, ask how to make the code faster, safer, or simpler. "
+    "Use plain English. Do not use any Rust vocabulary.",
 
-    # 7 — how do I do this common task
-    'Write Rust code for "{category}". '
-    'The prompt field should be a "how do I…" question phrased in plain English, the way someone '
-    'would phrase it in a search engine or to a colleague. No Rust-specific terms.',
+    # 7 — How do I do this common task
+    "TOPIC: {category}\n\n"
+    "TASK: For the JSON 'prompt' field, write a 'how do I...' question the way someone would type it "
+    "into a search engine. No Rust-specific terms.",
 
-    # 8 — comparing two plain-English approaches
-    'Write Rust code for "{category}". '
-    'The prompt field should ask which of two plain-English approaches is better for a practical reason — '
-    'speed, simplicity, or correctness — without naming any Rust constructs.',
+    # 8 — Comparing approaches
+    "TOPIC: {category}\n\n"
+    "TASK: For the JSON 'prompt' field, ask which of two plain-English approaches is better for speed "
+    "or simplicity. Do not name any Rust constructs.",
 
-    # 9 — converting or transforming things
-    'Write Rust code for "{category}". '
-    'The prompt field should describe a conversion or transformation in plain terms: '
-    '"I have X and I want Y". No Rust terminology.',
+    # 9 — Converting or transforming
+    "TOPIC: {category}\n\n"
+    "TASK: For the JSON 'prompt' field, describe a transformation in plain terms (e.g., 'I have X and I want Y'). "
+    "No Rust terminology.",
 
-    # 10 — something should just work
-    'Write Rust code for "{category}". '
-    'The prompt field should be a short, direct request — the kind of thing someone would type into '
-    'a chat box expecting working code back, with zero knowledge of how Rust works internally.',
+    # 10 — Something should just work
+    "TOPIC: {category}\n\n"
+    "TASK: For the JSON 'prompt' field, write a short, direct request expecting working code back. "
+    "Write it as someone with zero knowledge of how Rust works internally."
 ]
 
 # ── Category → required crates ────────────────────────────────────────────────
@@ -434,10 +400,7 @@ def build_user_prompt(
         focus = cat.get("prompt_focus", "").strip()
         if focus:
             prompt += (
-                f'\n\nInternal concept note (for code quality only — do NOT use these terms '
-                f'in the prompt field): "{category}" covers: {focus}\n'
-                f'The code must demonstrate these aspects. The prompt field must still use '
-                f'plain English with zero Rust terminology.'
+                f'\n\nFOCUS: {focus}\n'
             )
 
     cat_crates = _crates_for_category(cat)
@@ -448,14 +411,8 @@ def build_user_prompt(
             f'Set "crates": {crate_json} and import/use these crates in the code.'
         )
     else:
-        prompt += '\nNo external crates. Set "crates": [].'
+        prompt += '\n'
 
-    prompt += (
-        '\n\nFor the "prompt" field: write a plain-English request with ZERO Rust terminology. '
-        'It must sound like someone who has never used Rust describing what they want — '
-        'a goal, a problem, or a task in everyday language.'
-    )
-    prompt += '\n\nOutput the JSON object now.'
     return prompt
 
 
