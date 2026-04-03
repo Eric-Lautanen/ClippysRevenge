@@ -7,7 +7,7 @@ _sys.path = [p for p in _sys.path
 
 """
 mcp.py — Hardened MCP web search server for LM Studio headless
-Optimized for finding latest library versions, APIs, and docs.
+Optimized for finding latest Rust crate versions, APIs, and docs.
 
 Requirements:
     pip install mcp ddgs requests beautifulsoup4
@@ -15,7 +15,7 @@ Requirements:
 mcp.json entry:
     {
       "mcpServers": {
-        "web-search": {
+        "rust-search": {
           "command": "python",
           "args": ["C:\\LLM\\mcp.py"]
         }
@@ -60,6 +60,20 @@ logging.basicConfig(
 )
 log = logging.getLogger("mcp-search")
 
+# Silence the internal HTTP request logs produced by DDGS and its dependencies
+# (httpx, httpcore, urllib3).  These log every outbound request to search-engine
+# backends (Google, Yahoo, Brave, DuckDuckGo, Wikipedia autocomplete, etc.),
+# which is expected DDGS behaviour but creates confusing noise in the plugin log.
+# We keep WARNING+ so genuine errors (timeouts, SSL failures) still surface.
+for _noisy_logger in (
+    "ddgs", "duckduckgo_search",
+    "httpx", "httpcore",
+    "urllib3", "urllib3.connectionpool",
+    "requests.packages.urllib3",
+    "charset_normalizer",
+):
+    logging.getLogger(_noisy_logger).setLevel(logging.WARNING)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants / limits
 # ─────────────────────────────────────────────────────────────────────────────
@@ -75,6 +89,27 @@ HTTP_TIMEOUT     = 12         # seconds for individual HTTP calls
 FUTURES_TIMEOUT  = 20         # seconds for thread-pool completion
 DDG_RETRIES      = 3          # attempts before giving up on a DDG query
 DDG_BACKOFF      = [1, 2, 4]  # sleep seconds between retries
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Simple in-process TTL cache — prevents duplicate network hits when the model
+# calls web_search multiple times with identical or near-identical queries.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_CACHE_TTL_SECS = 300   # 5 minutes — covers any single fix-cascade session
+_search_cache: Dict[str, tuple] = {}  # key -> (expires_at, result_str)
+
+
+def _cache_get(key: str) -> Optional[str]:
+    entry = _search_cache.get(key)
+    if entry and time.time() < entry[0]:
+        log.info("Cache hit for query: %s", key[:80])
+        return entry[1]
+    return None
+
+
+def _cache_set(key: str, value: str) -> None:
+    _search_cache[key] = (time.time() + _CACHE_TTL_SECS, value)
+
 
 HEADERS = {
     "User-Agent": (
@@ -92,8 +127,159 @@ SKIP_TAGS = frozenset({
 })
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Domain whitelist — controls which domains our SESSION may connect to AND
+# which DDG result URLs are surfaced to the model.
+#
+# Matching is suffix-based: "rust-lang.org" covers doc.rust-lang.org,
+# blog.rust-lang.org, internals.rust-lang.org, users.rust-lang.org, …
+#
+# DDGS uses its own internal HTTP client (httpx/requests) to query search
+# engines (Google, Yahoo, Brave, DuckDuckGo, Mojeek) — that traffic is
+# external to this SESSION and cannot be blocked without breaking the library.
+# Those internal DDGS requests are silenced in the log below; only OUR fetch
+# calls (fetch_page / get_crates_package / get_github_release) are enforced.
+# ─────────────────────────────────────────────────────────────────────────────
+
+ALLOWED_DOMAINS: frozenset = frozenset({
+    # ── Official Rust infrastructure ──────────────────────────────────────────
+    "rust-lang.org",            # doc.*, blog.*, internals.*, users.*, play.*, …
+    "rustup.rs",
+    "crates.io",
+    "docs.rs",                  # official hosted crate documentation
+    "lib.rs",                   # alternative crate search / stats
+
+    # ── Source hosting ────────────────────────────────────────────────────────
+    "github.com",
+    "githubusercontent.com",    # raw.githubusercontent.com
+    "github.io",                # *.github.io — rust-lang.github.io, matklad.*, …
+    "gitlab.com",
+    "gitlab.io",                # *.gitlab.io — GitLab Pages
+
+    # ── Community Q&A ─────────────────────────────────────────────────────────
+    "stackoverflow.com",
+    "stackexchange.com",        # softwareengineering.stackexchange.com, etc.
+
+    # ── Official crate / framework sites ──────────────────────────────────────
+    "tokio.rs",
+    "rocket.rs",
+    "actix.rs",
+    "diesel.rs",
+    "serde.rs",
+    "hyper.rs",
+    "leptos.dev",
+    "dioxuslabs.com",
+    "bevy.rs",
+    "linebender.org",
+    "tauri.app",
+
+    # ── Hosted documentation platforms ────────────────────────────────────────
+    "readthedocs.io",           # *.readthedocs.io
+    "readthedocs.org",
+
+    # ── Rust tooling ──────────────────────────────────────────────────────────
+    "cheats.rs",
+    "deps.rs",
+    "rustfmt.rs",
+    "clippy.rs",
+
+    # ── High-quality Rust-focused blogs & guides ──────────────────────────────
+    "fasterthanli.me",
+    "without.boats",
+    "smallcultfollowing.com",   # Niko Matsakis
+    "corrode.dev",
+    "pretzelhammer.com",
+    "this-week-in-rust.org",
+    "llogiq.github.io",         # covered by github.io
+    "manishearth.github.io",    # covered by github.io
+    "burntsushi.net",           # Andrew Gallant (ripgrep, regex, csv)
+    "fitzgeraldnick.com",
+    "blog.adamchalmers.com",
+    "hegdenu.net",
+    "lobste.rs",
+
+    # ── Learning & exercises ──────────────────────────────────────────────────
+    "exercism.org",
+    "tourofrust.com",
+    "rustlings.cool",
+    "rust-exercises.com",
+
+    # ── Official Rust books (separately hosted) ───────────────────────────────
+    "rust-book.cs.brown.edu",
+    "rustwasm.github.io",       # covered by github.io
+    "rust-embedded.github.io",  # covered by github.io
+    "rust-unofficial.github.io",# covered by github.io
+})
+
+
+def _is_allowed_domain(url: str) -> bool:
+    """
+    Return True if the URL's hostname equals or is a subdomain of any entry
+    in ALLOWED_DOMAINS.  Strips leading "www." and port numbers first.
+
+        "https://doc.rust-lang.org/std/"  -> True  (suffix of rust-lang.org)
+        "https://tokio.rs/docs"           -> True  (exact match)
+        "https://wikipedia.org/wiki/Rust" -> False
+        "https://medium.com/..."          -> False
+    """
+    try:
+        host = urllib.parse.urlparse(url).netloc.lower().split(":")[0]
+        if host.startswith("www."):
+            host = host[4:]
+        if not host:
+            return False
+        for domain in ALLOWED_DOMAINS:
+            if host == domain or host.endswith("." + domain):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _filter_allowed(results: List[dict]) -> List[dict]:
+    """
+    Remove DDG result dicts whose href is not in ALLOWED_DOMAINS.
+    Rejected domains are logged so they are visible in the MCP server log.
+    """
+    allowed, rejected = [], []
+    for r in results:
+        href = r.get("href", "")
+        if _is_allowed_domain(href):
+            allowed.append(r)
+        else:
+            rejected.append(href)
+    if rejected:
+        log.info(
+            "Domain filter: dropped %d result(s) not in whitelist: %s",
+            len(rejected),
+            ", ".join(urllib.parse.urlparse(u).netloc for u in rejected if u)[:200],
+        )
+    return allowed
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Shared HTTP session (connection pooling + automatic retry on 5xx/network err)
 # ─────────────────────────────────────────────────────────────────────────────
+
+class _BlockingAdapter(HTTPAdapter):
+    """
+    HTTPAdapter subclass that enforces ALLOWED_DOMAINS at the socket level.
+    The check fires in send() — before any TCP connection is opened — so a
+    non-whitelisted hostname is never contacted, not even for a DNS lookup.
+
+    This covers all requests made through our shared SESSION (fetch_page,
+    get_crates_package, get_github_release).  DDGS uses its own internal
+    HTTP client and is not subject to this adapter; its results are filtered
+    separately by _filter_allowed().
+    """
+    def send(self, request, **kwargs):
+        if not _is_allowed_domain(request.url):
+            host = urllib.parse.urlparse(request.url).netloc
+            log.warning("SESSION blocked outbound request to non-whitelisted domain: %s", host)
+            raise requests.exceptions.ConnectionError(
+                f"Blocked by domain whitelist: '{host}' is not a trusted Rust source. "
+                f"Add it to ALLOWED_DOMAINS in mcp.py if it should be permitted."
+            )
+        return super().send(request, **kwargs)
+
 
 def _make_session() -> requests.Session:
     session = requests.Session()
@@ -104,7 +290,7 @@ def _make_session() -> requests.Session:
         allowed_methods={"GET"},
         raise_on_status=False,
     )
-    adapter = HTTPAdapter(max_retries=retry, pool_connections=8, pool_maxsize=16)
+    adapter = _BlockingAdapter(max_retries=retry, pool_connections=8, pool_maxsize=16)
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     session.headers.update(HEADERS)
@@ -226,9 +412,10 @@ def _ddg_search(query: str, max_results: int = 8) -> List[dict]:
         try:
             with DDGS() as ddgs:
                 results = list(ddgs.text(query, max_results=max_results))
+            results = _filter_allowed(results)
             if results:
                 return results
-            # Empty result is not an error — just return it
+            # Empty result (after domain filtering) is not an error
             return []
         except Exception as e:
             last_err = str(e)
@@ -296,7 +483,7 @@ def _run_parallel(
 # MCP server
 # ─────────────────────────────────────────────────────────────────────────────
 
-mcp = FastMCP("Web Search — Dev Edition")
+mcp = FastMCP("Rust Search — Dev Edition")
 
 
 # ── Tool 1 ────────────────────────────────────────────────────────────────────
@@ -307,15 +494,20 @@ def web_search(query: str, max_results: int = 8) -> str:
     """
     Search the web with DuckDuckGo. Returns titles, URLs, and snippets.
     For researching multiple angles simultaneously, prefer multi_search.
+    Repeated identical queries within 5 minutes are served from cache.
 
     Args:
         query: Search query string.
         max_results: Number of results to return (1-15, default 8).
     """
+    cache_key = f"ws:{_sanitize_query(query)}:{max_results}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
     results = _ddg_search(query, max_results)
-    if not results:
-        return f"No results found for: {query}"
-    return _fmt_results(results)
+    out = _fmt_results(results) if results else f"No results found for: {query}"
+    _cache_set(cache_key, out)
+    return out
 
 
 # ── Tool 2 ────────────────────────────────────────────────────────────────────
@@ -328,7 +520,7 @@ def multi_search(queries: List[str], max_results_each: int = 5) -> str:
     Deduplicates by URL. Use when you need multiple search angles at once.
 
     Example queries list:
-        ["pandas 2.2 changelog", "pandas 2.2 breaking changes", "pandas migrate 1.x 2.x"]
+        ["tokio 1.0 changelog", "tokio 1.0 breaking changes", "tokio migrate 0.x 1.0"]
 
     Args:
         queries: List of search queries (max 6).
@@ -345,6 +537,11 @@ def multi_search(queries: List[str], max_results_each: int = 5) -> str:
 
     max_results_each = min(max(1, max_results_each), 10)
 
+    cache_key = f"ms:{','.join(sorted(queries))}:{max_results_each}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     seen_urls: set[str] = set()
     tasks = {q: (lambda q=q: _ddg_search(q, max_results_each)) for q in queries}
     raw = _run_parallel(tasks)
@@ -360,7 +557,9 @@ def multi_search(queries: List[str], max_results_each: int = 5) -> str:
         if unique:
             sections.append(f"### Query: {query_label}\n\n" + _fmt_results(unique))
 
-    return "\n\n═══════════════════\n\n".join(sections) if sections else "No results found."
+    out = "\n\n═══════════════════\n\n".join(sections) if sections else "No results found."
+    _cache_set(cache_key, out)
+    return out
 
 
 # ── Tool 3 ────────────────────────────────────────────────────────────────────
@@ -379,6 +578,15 @@ def fetch_page(url: str, max_chars: int = 6000) -> str:
     err = _validate_url(url)
     if err:
         return f"Invalid URL: {err}"
+
+    if not _is_allowed_domain(url):
+        host = urllib.parse.urlparse(url).netloc
+        log.warning("fetch_page blocked non-whitelisted domain: %s", host)
+        return (
+            f"Blocked: '{host}' is not in the trusted domain whitelist. "
+            f"Only Rust-focused sources (docs.rs, rust-lang.org, github.com, "
+            f"stackoverflow.com, crates.io, etc.) may be fetched."
+        )
 
     max_chars = min(max(100, max_chars), MAX_CHARS_PAGE)
 
@@ -465,132 +673,6 @@ def fetch_pages(urls: List[str], max_chars_each: int = 3000) -> str:
 
 @mcp.tool()
 @_safe_tool
-def get_pypi_package(package_name: str) -> str:
-    """
-    Get latest version, release date, summary, and recent version history
-    from the PyPI JSON API. Always current — no caching.
-
-    Args:
-        package_name: Exact PyPI package name e.g. "fastapi", "numpy".
-    """
-    package_name = package_name.strip().lower()
-    if not package_name:
-        return "Package name is required."
-
-    try:
-        resp = SESSION.get(f"https://pypi.org/pypi/{package_name}/json", timeout=HTTP_TIMEOUT)
-        if resp.status_code == 404:
-            return f"Package '{package_name}' not found on PyPI."
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.exceptions.Timeout:
-        return f"PyPI request timed out for '{package_name}'."
-    except Exception as e:
-        return f"PyPI API error for '{package_name}': {type(e).__name__}: {e}"
-
-    info = data.get("info", {})
-    urls  = data.get("urls", [])
-    upload_date = urls[0].get("upload_time", "unknown")[:10] if urls else "unknown"
-
-    # Get recent non-prerelease versions
-    all_versions = sorted(data.get("releases", {}).keys(), reverse=True)
-    stable = [v for v in all_versions if not re.search(r"[a-zA-Z]", v)][:10]
-    recent_display = stable or all_versions[:10]
-
-    return "\n".join(filter(None, [
-        f"**{info.get('name', package_name)}** v{info.get('version', '?')}",
-        f"Released:        {upload_date}",
-        f"Summary:         {info.get('summary') or 'N/A'}",
-        f"License:         {info.get('license') or 'N/A'}",
-        f"Requires Python: {info.get('requires_python') or 'N/A'}",
-        f"Homepage:        {info.get('home_page') or info.get('project_url') or 'N/A'}",
-        f"Docs:            {info.get('docs_url') or 'N/A'}",
-        "",
-        f"Recent stable versions: {', '.join(recent_display)}",
-        f"PyPI URL: https://pypi.org/project/{info.get('name', package_name)}/",
-    ]))
-
-
-# ── Tool 6 ────────────────────────────────────────────────────────────────────
-
-@mcp.tool()
-@_safe_tool
-def get_npm_package(package_name: str) -> str:
-    """
-    Get latest version, release date, and recent history from the npm registry.
-    Always current. Handles scoped packages (@org/pkg).
-
-    Args:
-        package_name: npm package name e.g. "react", "@types/node".
-    """
-    package_name = package_name.strip()
-    if not package_name:
-        return "Package name is required."
-
-    encoded = urllib.parse.quote(package_name, safe="@/")
-    try:
-        resp = SESSION.get(f"https://registry.npmjs.org/{encoded}", timeout=HTTP_TIMEOUT)
-        if resp.status_code == 404:
-            return f"Package '{package_name}' not found on npm."
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.exceptions.Timeout:
-        return f"npm registry request timed out for '{package_name}'."
-    except Exception as e:
-        return f"npm API error for '{package_name}': {type(e).__name__}: {e}"
-
-    latest_tag = (data.get("dist-tags") or {}).get("latest", "")
-    if not latest_tag:
-        return f"Package '{package_name}' exists on npm but has no 'latest' tag."
-
-    # Security placeholder check
-    description = data.get("description", "") or ""
-    if "security holding package" in description.lower():
-        return (
-            f"'{package_name}' is an npm security placeholder — "
-            "the real package likely has a different name or ecosystem."
-        )
-
-    latest_info = (data.get("versions") or {}).get(latest_tag, {})
-    time_data   = data.get("time") or {}
-    release_date = (time_data.get(latest_tag) or "unknown")[:10]
-
-    # Recent versions sorted newest-first
-    skip = {"created", "modified"}
-    recent = sorted(
-        [v for v in time_data if v not in skip],
-        key=lambda v: time_data.get(v, ""),
-        reverse=True,
-    )[:10]
-
-    deps      = latest_info.get("dependencies") or {}
-    peer_deps = latest_info.get("peerDependencies") or {}
-    repo      = data.get("repository") or {}
-    repo_url  = repo.get("url", "N/A") if isinstance(repo, dict) else str(repo)
-
-    lines = [
-        f"**{data.get('name', package_name)}** v{latest_tag}",
-        f"Released:    {release_date}",
-        f"Description: {description or 'N/A'}",
-        f"License:     {latest_info.get('license') or 'N/A'}",
-        f"Homepage:    {data.get('homepage') or 'N/A'}",
-        f"Repository:  {repo_url}",
-        "",
-        f"Recent versions: {', '.join(recent)}",
-    ]
-    if deps:
-        lines.append(f"Dependencies ({len(deps)}): {', '.join(list(deps)[:15])}")
-    if peer_deps:
-        lines.append(f"Peer deps: {', '.join(list(peer_deps)[:10])}")
-    lines.append(f"\nnpm URL: https://www.npmjs.com/package/{package_name}")
-
-    return "\n".join(lines)
-
-
-# ── Tool 7 ────────────────────────────────────────────────────────────────────
-
-@mcp.tool()
-@_safe_tool
 def get_crates_package(crate_name: str) -> str:
     """
     Get latest version and recent history for a Rust crate from crates.io.
@@ -648,7 +730,7 @@ def get_github_release(owner_repo: str) -> str:
     No auth token needed for public repos (60 req/hr unauthenticated).
 
     Args:
-        owner_repo: "owner/repo" e.g. "microsoft/typescript", "pydantic/pydantic".
+        owner_repo: "owner/repo" e.g. "microsoft/typescript", "tokio-rs/tokio".
     """
     owner_repo = owner_repo.strip().strip("/")
     if not owner_repo or owner_repo.count("/") != 1:
@@ -738,49 +820,41 @@ def get_github_release(owner_repo: str) -> str:
 @_safe_tool
 def find_latest_version(name: str, ecosystem: Optional[str] = None) -> str:
     """
-    Find the latest version of a package by checking all relevant registries
-    simultaneously (PyPI, npm, crates.io, and/or GitHub).
+    Find the latest version of a Rust crate by checking crates.io and/or GitHub.
     Filters out irrelevant or error results automatically.
 
     Args:
-        name: Package/library name, or "owner/repo" for GitHub.
-        ecosystem: Optional hint — "python", "node", "rust", "github".
-                   If omitted, all registries are checked in parallel.
+        name: Crate name, or "owner/repo" for GitHub.
+        ecosystem: Optional hint — "rust", "github".
+                   If omitted, both crates.io and GitHub are checked in parallel.
 
     Examples:
-        find_latest_version("pydantic")
-        find_latest_version("react", "node")
         find_latest_version("tokio", "rust")
-        find_latest_version("microsoft/typescript", "github")
+        find_latest_version("serde")
+        find_latest_version("rust-lang/rust", "github")
     """
     name = name.strip()
     if not name:
-        return "Package name is required."
+        return "Crate name is required."
 
     eco = (ecosystem or "").lower().strip()
 
     tasks: dict[str, Callable] = {}
 
-    if eco == "python":
-        tasks["PyPI"] = lambda: get_pypi_package(name)
-    elif eco == "node":
-        tasks["npm"] = lambda: get_npm_package(name)
-    elif eco == "rust":
+    if eco == "rust":
         tasks["crates.io"] = lambda: get_crates_package(name)
     elif eco == "github" or "/" in name:
         tasks["GitHub"] = lambda: get_github_release(name)
     else:
-        tasks["PyPI"]     = lambda: get_pypi_package(name)
-        tasks["npm"]      = lambda: get_npm_package(name)
         tasks["crates.io"] = lambda: get_crates_package(name)
-        tasks["Web"]      = lambda: _fmt_results(
-            _ddg_search(f"{name} latest version release site:github.com OR site:pypi.org", 3)
+        tasks["Web"]       = lambda: _fmt_results(
+            _ddg_search(f"{name} rust crate latest version release site:github.com OR site:crates.io", 3)
         )
 
     raw = _run_parallel(tasks, timeout=15)
 
     NOISE = (
-        "not found on pypi", "not found on npm", "not found on crates",
+        "not found on crates",
         "security holding package", "security placeholder",
     )
 
@@ -792,7 +866,7 @@ def find_latest_version(name: str, ecosystem: Optional[str] = None) -> str:
         sections.append(f"## {label}\n\n{content}")
 
     return "\n\n═══════════════════\n\n".join(sections) if sections else \
-           f"'{name}' not found in any registry."
+           f"'{name}' not found on crates.io or GitHub."
 
 
 # ── Tool 10 ───────────────────────────────────────────────────────────────────
@@ -805,18 +879,18 @@ def find_changelog(
     to_version: Optional[str] = None,
 ) -> str:
     """
-    Find a library's changelog, migration guide, or breaking changes.
+    Find a Rust crate's changelog, migration guide, or breaking changes.
     Runs multiple targeted searches in parallel.
 
     Args:
-        library: Library name e.g. "pydantic", "react", "sqlalchemy".
-        from_version: Starting version e.g. "v1", "17".
-        to_version: Target version e.g. "v2", "18".
+        library: Crate name e.g. "tokio", "serde", "axum".
+        from_version: Starting version e.g. "0.1", "1.0".
+        to_version: Target version e.g. "1.0", "2.0".
 
     Examples:
-        find_changelog("pydantic", "v1", "v2")
-        find_changelog("react", "17", "18")
-        find_changelog("sqlalchemy")
+        find_changelog("tokio", "0.x", "1.0")
+        find_changelog("serde", "1.0", "2.0")
+        find_changelog("axum")
     """
     library = library.strip()
     if not library:
@@ -847,18 +921,18 @@ def search_api_docs(
     version: Optional[str] = None,
 ) -> str:
     """
-    Search for API documentation on a specific topic within a library.
+    Search for API documentation on a specific topic within a Rust crate.
     Runs multiple targeted searches in parallel for best coverage.
 
     Args:
-        library: Library name e.g. "fastapi", "pandas", "tokio".
-        topic: Specific API topic e.g. "dependency injection", "groupby agg".
-        version: Optional version to scope results e.g. "2.2", "0.9".
+        library: Crate name e.g. "tokio", "serde", "axum".
+        topic: Specific API topic e.g. "async runtime", "derive macros".
+        version: Optional version to scope results e.g. "1.0", "0.9".
 
     Examples:
-        search_api_docs("fastapi", "dependency injection")
-        search_api_docs("pandas", "groupby agg", "2.2")
         search_api_docs("tokio", "select macro")
+        search_api_docs("serde", "derive macros", "1.0")
+        search_api_docs("axum", "middleware")
     """
     library = library.strip()
     topic   = topic.strip()
