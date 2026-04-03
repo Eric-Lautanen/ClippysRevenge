@@ -159,7 +159,7 @@ USE_MCP: bool = False
 # giving up or escalating to Stage 2 MCP search.
 # Each retry calls the model again with the same errors; increasing this gives
 # the model more chances to correct itself at the cost of extra inference time.
-SELF_FIX_RETRIES: int = 5
+SELF_FIX_RETRIES: int = 3
 SHARED_TARGET_DIR = Path(__file__).parent / "cargo_target"  # shared build cache
 
 # LM Studio API token — set LM_API_TOKEN in the environment if auth is enabled.
@@ -240,46 +240,50 @@ CRATE_MAP: dict[str, str] = {
 #  LLM PROMPTS
 # ─────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """\
-You are a Rust expert generating training data. Output ONE raw JSON object. No markdown fences, no explanation — just the JSON.
+SYSTEM_PROMPT = """You are a RUST expert. Output ONE raw JSON object. No markdown fences, no explanation — just the JSON.
 
 OUTPUT FORMAT:
 {
   "category": "Category here",
-  "difficulty": "beginner|intermediate|hard",
-  "prompt": "The request or question being answered",
+  "difficulty": "beginner|intermediate|advanced",
+  "prompt": "The plain-English request being answered",
   "code": "Complete Rust code here",
-  "explanation": "Technical explanation of why the code is written this way",
-  "concepts": ["list", "of", "concepts" ],
+  "explanation": "Why the code is written this way — for training context only",
+  "concepts": ["list", "of", "concepts"],
   "crates": []
 }
 
 PROMPT FIELD RULES — CRITICAL:
-The prompt field is a short, natural developer request. Maximum 2 sentences.
+The prompt field simulates what a non-Rust programmer would type. It must sound like plain English from someone who has never used Rust, does not know Rust terminology, and just wants something to work. Maximum 2 sentences.
 
-Pick ONE archetype per example. Rotate across all of them:
+Pick ONE framing per example. Rotate across all of them:
 
-  DIRECT TASK     — imperative, states exactly what to write
-  IDIOMATIC       — asks for the "right way" to do something
-  DESIGN QUESTION — asks which of two approaches to pick
-  DEBUG SCENARIO  — describes a compiler error or borrow issue to fix
-  SPECIFIC API    — asks how a particular type, method, or trait works
-  COMPARISON      — contrasts two patterns or types
-  CONVERSION      — asks how to transform data from one shape to another
+  PLAIN TASK    — just says what they want built or done, no jargon
+  PROBLEM       — describes a real-world situation they want to solve in code
+  FIX IT        — describes behaviour that is wrong and asks to make it right
+  HOW TO        — asks how to do a common programming task without Rust terms
+  MAKE IT WORK  — gives a vague goal and trusts the model to figure out the details
+  COMPARISON    — asks which of two plain-English approaches is better
+  CONVERT       — asks to turn one kind of data into another in plain terms
 
 Rules:
 - 1 to 2 sentences. Never more.
-- Vary the opening word. Do not start consecutive prompts with "I".
-- Rust terminology is fine when it fits. Not every prompt needs to hide jargon.
-- Bad: "I'm building a graph traversal system where nodes need to..."  ← scenario setup, too long
-- Bad: "I'm working on a project that involves..."  ← never start this way
-- Bad: "Can you show how to use X to allow Y while ensuring Z?"  ← too many clauses
-
+- NO Rust terminology in the prompt field: no "trait", "borrow", "lifetime", "ownership", "impl",
+  "enum", "match", "Result", "Option", "closure", "iterator", "derive", "unsafe", "async",
+  "Arc", "Mutex", "Vec", "HashMap", or any other Rust-specific word.
+- Write as if the person Googled their problem or asked a colleague. Natural, direct, outcome-focused.
+- Vary the opening. Do not start consecutive prompts with "I".
+- Bad: "Show me how to use the Iterator trait to transform a Vec<T>"  ← Rust jargon
+- Bad: "Write an idiomatic implementation using pattern matching"      ← Rust jargon
+- Bad: "How do I impl Display for my custom type?"                    ← Rust jargon
+- Good: "I have a list of numbers and want to double each one"
+- Good: "How do I make my program read a file and print each line?"
+- Good: "I want to store a bunch of key-value pairs and look them up by name"
+- Good: "My program crashes when a value is missing — how do I handle that gracefully?"
 
 CODE RULES:
-0. NEVER COMMENT THE CODE! NEVER PUT COMMENTS IN THE CODE!!
 1. code must be a complete Rust edition-2021 file with fn main and all use statements.
-2. Keep code SHORT and FOCUSED — 15 to 75 lines is the target. Do not write full applications.
+2. Keep code SHORT and FOCUSED — 15 to 50 lines is the target. Do not write full applications.
    One or two small functions plus a fn main that exercises them is the right scope.
 3. Only use the crates listed in the user prompt. If none are listed, crates: [].
 4. No #[allow(...)] or #![allow(...)]. Fix warnings properly.
@@ -288,11 +292,6 @@ CODE RULES:
 7. code must be correct and idiomatic — clear, clean, and focused on demonstrating one concept well.
 8. No comments of any kind — no // line comments, no /* block comments */, no //! or /// doc comments."""
 
-# System prompt used exclusively for self-fix and MCP-fix LLM calls.
-# Kept intentionally minimal: the model must output ONLY corrected Rust source
-# code with no JSON wrapper, no markdown explanation, and no commentary.
-# A heavyweight "training data generator" prompt causes the model to revert to
-# full-schema output instead of just the fixed code.
 SYSTEM_PROMPT_FIX = """\
 You are a Rust compiler expert. Your only job is to fix broken Rust code.
 
@@ -310,51 +309,55 @@ OUTPUT RULES — follow these exactly:
 # does not need to appear in the prompt sent to the model.
 
 _USER_PROMPTS: list[str] = [
-    # 1 — just write the code, explanation is secondary
-    'Write idiomatic Rust code for "{category}". '
-    'The code is the primary deliverable — make it clean, correct, and complete. '
-    'The explanation should justify the key design decisions, not narrate the code line by line.',
+    # 1 — plain outcome: someone just wants a thing to work
+    'For the Rust concept "{category}", write working code. '
+    'The prompt field must sound like a non-programmer describing what they want in plain English — '
+    'no Rust terms, no jargon, just the goal. The explanation is internal context for training only.',
 
-    # 2 — specific angle, not the most obvious one
-    'For "{category}", write a short Rust example that focuses on one specific aspect of the concept — '
-    'not necessarily the first thing someone would reach for. '
-    'The explanation says which aspect is shown and why the code is written this way.',
+    # 2 — everyday problem framing
+    'Write Rust code for "{category}". '
+    'The prompt field should describe a real, everyday situation a normal person would recognise — '
+    'like reading a file, processing a list, or handling missing data. No Rust terminology.',
 
-    # 3 — correct over naive
-    'For "{category}", write the correct Rust solution. '
-    'The explanation briefly notes what a naive attempt might get wrong and why this version avoids it.',
+    # 3 — something went wrong
+    'Write Rust code for "{category}". '
+    'The prompt field should describe a problem the user is experiencing in plain terms — '
+    'something that is broken, crashing, or not behaving as expected. No Rust jargon.',
 
-    # 4 — practical framing
-    'Write a short, practical Rust snippet for "{category}". '
-    'The code should feel like something you would actually write, not a textbook exercise. '
-    'The explanation states the concept and the reasoning behind the implementation.',
+    # 4 — I want to build something
+    'Write Rust code for "{category}". '
+    'The prompt field should be phrased as someone describing what they want to build or accomplish, '
+    'in the same way they would describe it to a friend who writes code. No technical Rust terms.',
 
-    # 5 — minimal: one concept, nothing extra
-    'Write the smallest complete Rust program that demonstrates "{category}" unambiguously. '
-    'Remove anything that does not directly serve the concept. '
-    'The explanation names the specific rule or guarantee being demonstrated and why it matters.',
+    # 5 — I have data, I want a result
+    'Write Rust code for "{category}". '
+    'The prompt field should describe a data transformation or calculation in plain English — '
+    'what goes in, what should come out. No mention of types, traits, or Rust-specific concepts.',
 
-    # 6 — why this approach
-    'For "{category}", write a short Rust example using the idiomatic approach. '
-    'The explanation names the approach chosen and why it is the right one here.',
+    # 6 — make it faster / safer / simpler
+    'Write Rust code for "{category}". '
+    'The prompt field should describe a practical concern: making something faster, preventing a crash, '
+    'or simplifying repetitive logic — in plain English without any Rust vocabulary.',
 
-    # 7 — constraint-aware
-    'Write a short Rust example for "{category}" that respects one natural constraint of the concept '
-    '(e.g. avoiding unnecessary clones, staying in safe Rust, not allocating). '
-    'The explanation names the constraint and how the code satisfies it.',
+    # 7 — how do I do this common task
+    'Write Rust code for "{category}". '
+    'The prompt field should be a "how do I…" question phrased in plain English, the way someone '
+    'would phrase it in a search engine or to a colleague. No Rust-specific terms.',
 
-    # 8 — goal-driven
-    'For "{category}", write a short Rust example that accomplishes one specific, named goal. '
-    'The explanation connects the implementation back to that goal.',
+    # 8 — comparing two plain-English approaches
+    'Write Rust code for "{category}". '
+    'The prompt field should ask which of two plain-English approaches is better for a practical reason — '
+    'speed, simplicity, or correctness — without naming any Rust constructs.',
 
-    # 9 — API/trait surface focus
-    'Write a short Rust example for "{category}" that shows the relevant API or trait in use. '
-    'The explanation names the API and why it fits here.',
+    # 9 — converting or transforming things
+    'Write Rust code for "{category}". '
+    'The prompt field should describe a conversion or transformation in plain terms: '
+    '"I have X and I want Y". No Rust terminology.',
 
-    # 10 — performance or correctness rationale
-    'For "{category}", write Rust code where the implementation choice is driven by either a correctness guarantee '
-    'or a performance property (pick whichever is more relevant to the concept). '
-    'The explanation must name that property explicitly and explain how the code achieves it.',
+    # 10 — something should just work
+    'Write Rust code for "{category}". '
+    'The prompt field should be a short, direct request — the kind of thing someone would type into '
+    'a chat box expecting working code back, with zero knowledge of how Rust works internally.',
 ]
 
 # ── Category → required crates ────────────────────────────────────────────────
@@ -431,10 +434,10 @@ def build_user_prompt(
         focus = cat.get("prompt_focus", "").strip()
         if focus:
             prompt += (
-                f'\n\nConcept focus for "{category}":\n'
-                f'{focus}\n'
-                f'Make sure the code and explanation clearly demonstrate one or more '
-                f'of these specific aspects.'
+                f'\n\nInternal concept note (for code quality only — do NOT use these terms '
+                f'in the prompt field): "{category}" covers: {focus}\n'
+                f'The code must demonstrate these aspects. The prompt field must still use '
+                f'plain English with zero Rust terminology.'
             )
 
     cat_crates = _crates_for_category(cat)
@@ -448,9 +451,9 @@ def build_user_prompt(
         prompt += '\nNo external crates. Set "crates": [].'
 
     prompt += (
-        '\n\nFor the "prompt" field: pick one archetype from the system prompt (direct-task, '
-        'idiomatic, design-question, debug-scenario, real-world-impl, code-review, specific-API, '
-        'constraint, comparison, or conversion) and write a concrete, natural request that fits it.'
+        '\n\nFor the "prompt" field: write a plain-English request with ZERO Rust terminology. '
+        'It must sound like someone who has never used Rust describing what they want — '
+        'a goal, a problem, or a task in everyday language.'
     )
     prompt += '\n\nOutput the JSON object now.'
     return prompt
