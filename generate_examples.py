@@ -2,11 +2,11 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
 ║   FrontierGen  —  Rust Code Example Generator                ║
-║   Generates broken→fixed pairs, validates with cargo tools   ║
+║   Generates idiomatic Rust examples, validates with cargo    ║
 ╚══════════════════════════════════════════════════════════════╝
 
 Reads rust_categories.jsonl, prompts LM Studio for frontier-format
-Rust examples, validates fixed_code with cargo check / clippy / fmt /
+Rust examples, validates code with cargo check / clippy / fmt /
 msrv, and writes verified examples to datasets/local/<category>.jsonl.
 
 Usage:
@@ -174,118 +174,86 @@ OUTPUT FORMAT:
 {
   "category": "Core - Ownership",
   "difficulty": "intermediate",
-  "prompt": "Why does this code fail to compile?",
-  "broken_code": "fn main() {\\n    let s = String::from(\\"hello\\");\\n    let t = s;\\n    println!(\\"{}\\", s);\\n}",
-  "error_message": "error[E0382]: borrow of moved value: `s`",
-  "error_code": "compile-error",
-  "fixed_code": "fn main() {\\n    let s = String::from(\\"hello\\");\\n    let t = s.clone();\\n    println!(\\"{}\\", s);\\n}",
-  "explanation": "Moving s into t makes s unavailable. Cloning s before the move lets both variables be used.",
-  "concepts": ["ownership", "move semantics"],
+  "prompt": "Demonstrate ownership transfer and cloning in Rust.",
+  "code": "fn main() {\\n    let s = String::from(\\"hello\\");\\n    let t = s.clone();\\n    println!(\\"{}  {}\\", s, t);\\n}",
+  "explanation": "Cloning s before assigning to t lets both variables remain valid. Without clone, the move would make s unavailable.",
+  "concepts": ["ownership", "clone"],
   "crates": []
 }
 
-COMPILE-ERROR RULE — MOST IMPORTANT:
-If error_code is "compile-error", broken_code MUST be rejected by rustc.
-Stick to simple, certain bugs: use-after-move, two &mut borrows, missing mut, type mismatch.
-If you are not 100% certain broken_code will fail to compile, use "logic-bug" instead.
-"logic-bug" is always safe: broken_code compiles but produces wrong output.
-
 CODE RULES:
-1. Both code fields must be complete Rust edition-2021 files with fn main and all use statements.
+1. code must be a complete Rust edition-2021 file with fn main and all use statements.
 2. Only use the crates listed in the user prompt. If none are listed, crates: [].
 3. No #[allow(...)] or #![allow(...)]. Fix warnings properly.
 4. Only use stdlib APIs you are certain exist. Vec/String/Option/Result need no import.
 5. No stub bodies — every function needs a real implementation.
-6. broken_code and fixed_code MUST differ meaningfully. Never copy the same code into both.
-7. fixed_code must be idiomatic Rust — not just correct, but written the way an experienced Rust developer would write it.
+6. code must be idiomatic Rust — correct, clean, and written the way an experienced Rust developer would write it."""
 
-ERROR TYPES:
-compile-error  → broken_code rejected by rustc. Only use when certain it will fail.
-runtime-panic  → broken_code compiles but panics at runtime.
-logic-bug      → broken_code compiles and runs but produces wrong output.
-design-issue   → broken_code works but is unidiomatic or fragile."""
+# ── 10 rotating user prompts ──────────────────────────────────────────────────
+# Each entry is a format string. Only {category} is substituted at call time.
+# The category id is stored in the output JSONL record (category_id field) and
+# does not need to appear in the prompt sent to the model.
 
-import random as _random
+_USER_PROMPTS: list[str] = [
+    # 1 — concept-first framing
+    'You are generating a Rust training example for the category "{category}".\n'
+    "Write idiomatic, working Rust code that clearly demonstrates a key concept in this category.\n"
+    "explanation should name the specific concept illustrated and explain why the code is written this way.",
 
-# ── Prompt variation pools ────────────────────────────────────────────────────
-# These are randomly sampled (seeded by attempt + category) so every call to
-# build_user_prompt produces a structurally different prompt.  The old approach
-# cycled personas in fixed order by attempt number, meaning attempt 9 was
-# identical to attempt 1.
+    # 2 — best-practice framing
+    'Generate an idiomatic Rust training example for "{category}".\n'
+    "The code should reflect how an experienced Rust developer approaches this category in production.\n"
+    "The explanation must: (1) identify the concept shown, (2) explain what makes this code idiomatic, "
+    "(3) describe any Rust-specific patterns or APIs used.",
 
-# Angles push the model toward structurally different bugs each generation.
-# Compile-error angles name the specific Rust error code so the model has an
-# unambiguous target to reproduce.  Each entry includes the error code, the
-# canonical compiler message, and a one-sentence recipe so small models have
-# the least ambiguity possible about what to generate.
-#
-# Selection criteria: only errors that are (a) trivially reproducible in <30
-# lines of pure stdlib code and (b) have a clear, deterministic fix.  Errors
-# that require complex trait machinery or nightly features are excluded.
-_COMPILE_ERROR_ANGLES: list[str] = [
-    # ── Ownership & moves (most reliable for small models) ──────────────────
-    "compile-error E0382: use of moved value — move a value into a binding or function call, then use the original variable afterward. SIMPLE: let t = s; println!(\"{}\", s);",
-    "compile-error E0505: cannot move out of borrowed value — hold a live shared borrow of a value, then try to move or drop the original. SIMPLE: let r = &s; drop(s);",
-    "compile-error E0596: cannot borrow as mutable, not declared as mutable — call a &mut method or take &mut on a variable declared without mut. SIMPLE: let v = Vec::new(); v.push(1);",
-    # ── Borrow checker ───────────────────────────────────────────────────────
-    "compile-error E0499: cannot borrow as mutable more than once — create two simultaneous &mut references to the same value. SIMPLE: let a = &mut v; let b = &mut v;",
-    "compile-error E0502: mutable borrow while immutably borrowed — hold a & borrow then take a &mut borrow of the same value. SIMPLE: let r = &v; let m = &mut v;",
-    "compile-error E0506: assign while borrowed — assign to a variable while a reference to it is still live. SIMPLE: let r = &x; x = 5;",
-    # ── Lifetimes ────────────────────────────────────────────────────────────
-    "compile-error E0106: missing lifetime specifier — define a struct that holds a reference field without a lifetime annotation. SIMPLE: struct Foo { val: &str }",
-    "compile-error E0515: cannot return reference to local data — return a reference to a variable owned by the current function. SIMPLE: fn f() -> &str { let s = String::from(\"x\"); &s }",
-    "compile-error E0597: value does not live long enough — store a reference to a local that is dropped before the reference is used. SIMPLE: let r; { let x = 5; r = &x; } println!(\"{}\", r);",
-    # ── Type system & traits ─────────────────────────────────────────────────
-    "compile-error E0308: type mismatch — return or assign a value of the wrong concrete type. SIMPLE: fn f() -> String { 42 }",
-    "compile-error E0369: binary operation not supported — use + or == on a custom struct that does not implement Add or PartialEq. SIMPLE: struct Point{x:i32,y:i32}; let _=p1+p2;",
-    "compile-error E0004: non-exhaustive match — write a match on an enum that is missing one or more variants. SIMPLE: enum Dir{N,S,E,W} match d { Dir::N=>1, Dir::S=>2 }",
-    # ── Imports & scope ──────────────────────────────────────────────────────
-    "compile-error E0412: type not in scope — use a type that requires a use statement without importing it. SIMPLE: let d: HashMap<_,_> = HashMap::new(); (without use std::collections::HashMap)",
-    "compile-error E0425: value not in scope — call a function or reference a variable that has not been defined or imported.",
-]
+    # 3 — idiomatic emphasis
+    'Create a Rust training example for the category "{category}".\n'
+    "The code must be what an experienced Rust developer would write — "
+    "not just correct, but idiomatic and clean.\n"
+    "The explanation should describe the Rust-specific reasoning behind the design choices.",
 
-_OTHER_ERROR_ANGLES: list[str] = [
-    # ── Runtime panics ───────────────────────────────────────────────────────
-    "runtime-panic from an out-of-bounds Vec index or slice access — index a collection with a value that can exceed its length.",
-    "runtime-panic from unwrap() on a None Option — call unwrap() on an Option that is None at runtime.",
-    "runtime-panic from unwrap() on an Err Result — call unwrap() on a Result that holds an error at runtime.",
-    "runtime-panic from integer overflow in a debug build — perform arithmetic that overflows for certain inputs.",
-    "runtime-panic from a divide-by-zero — divide an integer by a value that is zero at runtime.",
-    "runtime-panic from a stack overflow due to unbounded recursion — call a recursive function without a correct base case.",
-    # ── Logic bugs ───────────────────────────────────────────────────────────
-    "logic-bug with off-by-one error — loop bounds or index arithmetic is wrong by one, producing an incorrect result.",
-    "logic-bug involving an iterator adapter used incorrectly — e.g. map used where flat_map is needed, or take/skip used with wrong count.",
-    "logic-bug in error handling — an error is silently discarded with let _ = or by calling .ok(), hiding a real failure.",
-    "logic-bug from integer truncation — a value is cast from a wider to a narrower integer type, silently losing precision.",
-    "logic-bug from wrong operator precedence or short-circuit evaluation — logical expression evaluates differently than the author intended.",
-    "logic-bug in string or byte processing — incorrect use of chars() vs bytes(), or wrong index into a UTF-8 string.",
-    # ── Design issues ────────────────────────────────────────────────────────
-    "design-issue — unnecessary .clone() on every loop iteration that should instead borrow or use a reference.",
-    "design-issue — using .unwrap() throughout production code instead of propagating errors with ? and a proper Result return type.",
-    "design-issue — a Vec<T> is rebuilt from scratch on every call when it should be built once and reused.",
-    "design-issue — shared mutable state uses a raw Mutex<T> without Arc, or uses Arc<T> without Mutex when mutation is needed.",
-    "design-issue — a function takes ownership of a value (String, Vec) when it only needs to read it and should take a &str or &[T] instead.",
-    "design-issue — an enum or match arm uses a catch-all _ branch too broadly, silently ignoring new variants.",
-]
+    # 4 — pattern showcase framing
+    'Produce a Rust training example for "{category}" that showcases the canonical pattern '
+    "for this area.\n"
+    "code: a clean, complete demonstration of the right way to handle this concept\n"
+    "explanation: name the pattern explicitly and explain why it is the idiomatic Rust approach",
 
-# Combined pool — compile-error entries appear twice so they are sampled at
-# roughly 2:1 vs other types.  This reflects their higher training value and
-# the extra prompting they need to be generated correctly.
-_ERROR_ANGLES: list[str] = _COMPILE_ERROR_ANGLES * 2 + _OTHER_ERROR_ANGLES
+    # 5 — minimal demonstration framing
+    'Write a minimal but complete Rust training example for "{category}".\n'
+    "Illustrate exactly one concept clearly — nothing extraneous.\n"
+    "The explanation must teach the concept, not just describe the code.\n"
+    "A student reading only the explanation should understand the rule and why the code follows it.",
 
-# Code shape hints force structural variety. Async/threading shapes are excluded
-# because they require external crates (tokio) which the system prompt forbids.
-_CODE_SHAPES: list[str] = [
-    "Use a struct with named fields to demonstrate the issue.",
-    "Show the bug inside a closure or iterator chain.",
-    "Use a function that takes a reference parameter.",
-    "Demonstrate the issue across two separate functions.",
-    "Use a Vec or HashMap as the primary data structure.",
-    "Use an enum with multiple variants to drive the logic.",
-    "Use a trait and an impl block to surface the problem.",
-    "Show the bug inside a loop or recursive function.",
-    "Use a generic function with a type parameter.",
-    "Use a nested struct to expose the issue.",
+    # 6 — real-world framing
+    'Generate a realistic Rust training example for "{category}".\n'
+    "Imagine a developer writing production code in this area — show the right way to do it.\n"
+    "code: clean, idiomatic, production-quality\n"
+    "explanation: what concept is demonstrated and what makes this the idiomatic approach",
+
+    # 7 — rule-demonstration framing
+    'Create a Rust training example for "{category}" that clearly demonstrates '
+    "the core Rust rule or idiom for this area.\n"
+    "explanation: focus on the specific Rust rule or idiom the code embodies and why it matters",
+
+    # 8 — teaching-through-example framing
+    'For the category "{category}", write a Rust training example designed to teach the concept '
+    "through a clear, well-structured demonstration.\n"
+    "code should make the concept visible and easy to reason about.\n"
+    "explanation connects the code structure to the underlying Rust concept.",
+
+    # 9 — specification-driven framing
+    'Generate a Rust training example for "{category}".\n'
+    "Identify: (1) the specific rule or API in this category being demonstrated, "
+    "(2) how code applies it correctly, (3) what makes this the idiomatic choice.\n"
+    "The explanation must be detailed enough that a model trained on it learns the rule.",
+
+    # 10 — step-by-step reasoning framing
+    'Produce a Rust training example for "{category}" using this process:\n'
+    "1. Identify a specific, important concept in this category\n"
+    "2. Write code that demonstrates it clearly and idiomatically\n"
+    "3. Write an explanation that names the concept, explains why the code is written this way, "
+    "and states the Rust rule or idiom it follows\n"
+    "The explanation is the most important field — it is what trains the model.",
 ]
 
 # ── Category → required crates ────────────────────────────────────────────────
@@ -337,151 +305,34 @@ def _crates_for_category(cat: dict) -> list[str]:
     return found
 
 
-# ── Category-aware error angle selection ─────────────────────────────────────
-
-# Angles that work well for design/idiom categories
-_DESIGN_ANGLES: list[str] = [a for a in _OTHER_ERROR_ANGLES if "design-issue" in a]
-# Angles safe for beginner difficulty (simple, unambiguous ownership/borrow errors)
-_BEGINNER_COMPILE_ANGLES: list[str] = _COMPILE_ERROR_ANGLES[:6]
-# Angles safe for beginner difficulty (simple panics and logic bugs)
-_BEGINNER_OTHER_ANGLES: list[str] = _OTHER_ERROR_ANGLES[:6]
-
-
-def _error_angle_for_category(cat: dict, rng: _random.Random) -> str:
-    """
-    Return an error angle appropriate for this category's difficulty and domain.
-
-    Rules (in priority order):
-    1. unsafe/ffi tags → never compile-error (unsafe bypasses borrow checker)
-    2. Crate-focused categories → design-issue/logic-bug (the example must demo the crate API)
-    3. performance/optimization/idiom/allocation tags → strongly bias design-issue
-    4. advanced difficulty → de-emphasize compile-error (harder for small models)
-    5. beginner difficulty → only simple ownership/borrow errors + basic panics
-    6. Otherwise → full weighted pool (compile-error 2:1 over others)
-    """
-    tags = {t.lower().replace("-", "") for t in cat.get("tags", [])}
-    difficulty = cat.get("difficulty", "intermediate")
-
-    if tags & {"unsafe", "ffi"}:
-        return rng.choice(_OTHER_ERROR_ANGLES)
-
-    # If this category is about a specific external crate, the example needs to
-    # demonstrate that crate's API — a borrow-checker compile-error angle would
-    # produce an example that ignores the crate entirely.
-    if _crates_for_category(cat):
-        return rng.choice(_DESIGN_ANGLES * 2 + _OTHER_ERROR_ANGLES)
-
-    design_tags = {"performance", "optimization", "allocation", "zerocopy",
-                   "idioms", "binarysize", "noalloc"}
-    if tags & design_tags:
-        return rng.choice(_DESIGN_ANGLES * 3 + _OTHER_ERROR_ANGLES)
-
-    if difficulty == "advanced":
-        # compile-error 1:2 vs others (flipped from default)
-        return rng.choice(_COMPILE_ERROR_ANGLES + _OTHER_ERROR_ANGLES * 2)
-
-    if difficulty == "beginner":
-        return rng.choice(_BEGINNER_COMPILE_ANGLES * 2 + _BEGINNER_OTHER_ANGLES)
-
-    return rng.choice(_ERROR_ANGLES)  # full weighted pool
-
-
-# ── gen_type → prompt style hint ─────────────────────────────────────────────
-
-_GEN_TYPE_HINTS: dict[str, str] = {
-    "lecture": (
-        "Prompt style: phrase the prompt field as a teaching question — "
-        "e.g. 'How do you...?', 'What is the idiomatic way to...?', "
-        "'When should you use X instead of Y?'"
-    ),
-    "convo": (
-        "Prompt style: phrase the prompt field as a debugging question — "
-        "e.g. 'Why does this fail to compile?', "
-        "'Why does this produce the wrong output?', 'What is wrong here?'"
-    ),
-}
-
-
 def build_user_prompt(
     cat: dict,
     attempt: int = 1,
-    correction_hint: str = "",
 ) -> str:
     """
-    Build a varied user prompt for the given category + attempt number.
-
-    correction_hint — when a previous attempt produced broken_code that
-    compiled cleanly (broken-compiles failure), pass a short description of
-    what went wrong so the model can avoid repeating the same mistake.
+    Build a user prompt for the given category + attempt number by cycling
+    through 10 rotating templates. Only {category} is substituted — the id
+    is stored in the output record (category_id) and never sent to the model.
     """
-    # Seed with attempt + a stable hash of the category name so that:
-    #  - Every (category, attempt) pair produces a unique prompt combination.
-    #  - Retries on the same category never repeat the same prompt.
-    #  - The sequence is reproducible for debugging.
-    rng = _random.Random(attempt * 9973 + (hash(cat.get("category", "")) & 0xFFFFFFFF))
+    category = cat["category"]
 
-    error_angle  = _error_angle_for_category(cat, rng)
-    code_shape   = rng.choice(_CODE_SHAPES)
+    # Rotate deterministically: each (category, attempt) pair picks a distinct
+    # template, and retries never land on the same one.
+    idx     = (attempt - 1) % len(_USER_PROMPTS)
+    prompt  = _USER_PROMPTS[idx].format(category=category)
 
-    is_compile_error = error_angle.startswith("compile-error")
-    cat_crates   = _crates_for_category(cat)
-    gen_type     = cat.get("gen_type", "both")
-    prompt_focus = cat.get("prompt_focus", cat.get("description", ""))
-
-    parts = [
-        f'Category: "{cat["category"]}"',
-        f'Difficulty: {cat["difficulty"]}',
-        f'Concepts to demonstrate: {prompt_focus}',
-    ]
-
-    tags = cat.get("tags", [])
-    if tags:
-        parts.append(f'Tags: {", ".join(tags)}')
-
-    # ── Crate guidance ────────────────────────────────────────────────────
+    cat_crates = _crates_for_category(cat)
     if cat_crates:
         crate_json = "[" + ", ".join(f'"{c}"' for c in cat_crates) + "]"
-        parts.append(
-            f'Required crates: {", ".join(cat_crates)}. '
-            f'Set "crates": {crate_json} and import/use these crates in both code fields.'
+        prompt += (
+            f'\nRequired crates: {", ".join(cat_crates)}. '
+            f'Set "crates": {crate_json} and import/use these crates in the code.'
         )
     else:
-        parts.append('No external crates. Set "crates": [].')
+        prompt += '\nNo external crates. Set "crates": [].'
 
-    # ── Prompt style from gen_type ────────────────────────────────────────
-    gen_hint = _GEN_TYPE_HINTS.get(gen_type, "")
-    if gen_hint:
-        parts.append(gen_hint)
-
-    # ── Error angle and code shape ────────────────────────────────────────
-    parts.append(f'Error angle: {error_angle}')
-    parts.append(f'Code shape: {code_shape}')
-
-    # ── Core requirement: must use concepts from prompt_focus ─────────────
-    parts.append(
-        'REQUIREMENT: The example MUST directly use a specific API, method, '
-        'or pattern named in "Concepts to demonstrate" above. '
-        'A generic example that ignores the category focus is wrong.'
-    )
-
-    # ── Compile-error inline reminder ─────────────────────────────────────
-    if is_compile_error:
-        parts.append(
-            "\nREMINDER: error_code is compile-error. "
-            "broken_code MUST be rejected by rustc with the stated error. "
-            "Keep the bug small and obvious. "
-            "If you are not 100% sure it will fail to compile, use logic-bug instead."
-        )
-
-    if correction_hint:
-        parts.append(f'\nPREVIOUS ATTEMPT FAILED: {correction_hint}')
-        parts.append(
-            "Switch to error_code \"logic-bug\" or \"design-issue\" if you cannot "
-            "produce broken_code that is guaranteed to fail compilation."
-        )
-
-    parts.append('\nOutput the JSON object now.')
-    return "\n".join(parts)
+    prompt += '\n\nOutput the JSON object now.'
+    return prompt
 
 
 # ─────────────────────────────────────────────────────────
@@ -704,10 +555,8 @@ _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
 # Matches any { … } block, even if preceded by prose / preamble text.
 _JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 
-REQUIRED_FIELDS = {"category", "difficulty", "prompt", "broken_code",
-                   "error_message", "error_code", "fixed_code", "explanation"}
+REQUIRED_FIELDS = {"category", "difficulty", "prompt", "code", "explanation"}
 
-_VALID_ERROR_CODES = {"compile-error", "logic-bug", "design-issue", "runtime-panic"}
 _VALID_DIFFICULTIES = {"beginner", "intermediate", "advanced"}
 _MIN_CODE_LEN = 20   # characters — reject suspiciously tiny code snippets
 
@@ -989,9 +838,9 @@ def _repair_stray_closing_braces(text: str) -> Optional[dict]:
     Remove stray },  that appear directly after a string field value.
 
     Some models emit an extra closing brace after multi-line code fields:
-        "broken_code": "...",
+        "code": "...",
         },               ← spurious — the object is not closed here
-        "error_message": "..."
+        "explanation": "..."
 
     The pattern is unambiguous: a `},` that follows a closing string quote
     (`",`) cannot be a legitimate nested-object close (which would follow the
@@ -1204,9 +1053,7 @@ def _normalize_code(code: str) -> str:
     """
     Normalise a Rust snippet for fuzzy equality comparison.
     Strips allow attributes, // and /* */ comments, then collapses all
-    whitespace runs to a single space.  Used to catch "no-fix" cases where
-    the model only made cosmetic (whitespace / comment / allow-attr) changes
-    between broken_code and fixed_code.
+    whitespace runs to a single space.  Used for deduplication hashing.
     """
     code = _ALLOW_ATTR.sub("", code)
     code = _STRIP_LINE_COMMENT.sub("", code)
@@ -1225,9 +1072,7 @@ def parse_example(text: str) -> Optional[dict]:
 
     Content validation (post-parse):
       • All REQUIRED_FIELDS present
-      • broken_code and fixed_code are not identical (no fix was applied)
-      • Neither code is suspiciously short
-      • error_code is one of the four canonical values
+      • code is not suspiciously short
     """
     global _last_reject_reason
     _last_reject_reason = "json-parse"   # default if we can't even extract JSON
@@ -1267,32 +1112,12 @@ def parse_example(text: str) -> Optional[dict]:
         data["crates"] = []
 
     # ── Content quality checks ────────────────────────────────────────
-    broken  = data.get("broken_code",  "").strip()
-    fixed   = data.get("fixed_code",   "").strip()
-    error_c = data.get("error_code",   "")
-
-    # Reject if the model returned the same code for both fields (exact or fuzzy).
-    # Fuzzy comparison strips comments and collapses whitespace so that purely
-    # cosmetic differences (reformatting, added/removed blank lines, comment-only
-    # changes) are still caught as no-fix.
-    if broken == fixed or _normalize_code(broken) == _normalize_code(fixed):
-        _last_reject_reason = "no-fix"
-        return None
+    code = data.get("code", "").strip()
 
     # Reject trivially short code (almost certainly a placeholder)
-    if len(broken) < _MIN_CODE_LEN or len(fixed) < _MIN_CODE_LEN:
+    if len(code) < _MIN_CODE_LEN:
         _last_reject_reason = "too-short"
         return None
-
-    # Normalise error_code to the canonical set; reject unknown values
-    if error_c not in _VALID_ERROR_CODES:
-        lower_map = {v.lower(): v for v in _VALID_ERROR_CODES}
-        normalised = lower_map.get(error_c.lower())
-        if normalised:
-            data["error_code"] = normalised
-        else:
-            _last_reject_reason = "bad-error-code"
-            return None
 
     # Normalise difficulty
     diff = data.get("difficulty", "")
@@ -1475,7 +1300,7 @@ def _autopatch_debug(code: str) -> str:
     return "".join(out)
 
 
-def validate(fixed_code: str, declared_crates: list[str]) -> dict:
+def validate(code: str, declared_crates: list[str]) -> dict:
     """
     Create a temp cargo project, run check / clippy / fmt / msrv.
 
@@ -1498,7 +1323,7 @@ def validate(fixed_code: str, declared_crates: list[str]) -> dict:
         "clippy_lints": [], "clippy_output": "",
         "min_rust_version": "1.56.0",
         "compiler_ver": "", "has_unsafe": False,
-        "wrapped_code": fixed_code, "errors": [],
+        "wrapped_code": code, "errors": [],
     }
 
     # Detect compiler version once
@@ -1508,7 +1333,7 @@ def validate(fixed_code: str, declared_crates: list[str]) -> dict:
     except Exception:
         pass
 
-    wrapped = wrap_for_check(fixed_code)
+    wrapped = wrap_for_check(code)
     # Detect crates from the wrapped code so anything injected by wrap_for_check
     # (e.g. #[tokio::main]) is included in the dependency list.
     detected = detect_crates(wrapped)
@@ -1583,35 +1408,6 @@ def validate(fixed_code: str, declared_crates: list[str]) -> dict:
     return result
 
 
-def check_broken_compiles(broken_code: str, declared_crates: list[str]) -> bool:
-    """
-    Return True if *broken_code* successfully passes cargo check — meaning the
-    model generated code that isn't actually broken, making the example invalid.
-
-    Only the error path is interesting here, so we skip clippy/fmt/msrv and
-    return as soon as cargo check finishes.  The shared target dir is reused
-    so incremental compilation keeps this fast.
-    """
-    wrapped = wrap_for_check(broken_code)
-    detected = detect_crates(wrapped)
-    all_crates = sorted(set(declared_crates + detected))
-
-    SHARED_TARGET_DIR.mkdir(parents=True, exist_ok=True)
-    cargo_env = {**os.environ, "CARGO_TARGET_DIR": str(SHARED_TARGET_DIR)}
-
-    try:
-        with tempfile.TemporaryDirectory(prefix="frontier_brok_") as tmp:
-            proj = Path(tmp) / "rust-example"
-            proj.mkdir()
-            (proj / "Cargo.toml").write_text(make_cargo_toml(all_crates), encoding="utf-8")
-            src = proj / "src"
-            src.mkdir()
-            (src / "main.rs").write_text(wrapped, encoding="utf-8")
-            r = _run(["cargo", "check", "--quiet", "--color=never"], proj, env=cargo_env)
-            return r.returncode == 0
-    except Exception:
-        return False  # if cargo itself errors, don't block the attempt
-
 
 # ─────────────────────────────────────────────────────────
 #  OUTPUT
@@ -1628,7 +1424,7 @@ def log_cargo_failure(
     attempt: int,
     model: str,
     raw: str,
-    fixed_code: str,
+    code: str,
     wrapped_code: str,
     errors: list[str],
 ) -> None:
@@ -1643,9 +1439,9 @@ def log_cargo_failure(
         f.write(raw if raw else "<empty>")
         if raw and not raw.endswith("\n"):
             f.write("\n")
-        f.write("── fixed_code (as submitted) ──\n")
-        f.write(fixed_code)
-        if not fixed_code.endswith("\n"):
+        f.write("── code (as submitted) ──\n")
+        f.write(code)
+        if not code.endswith("\n"):
             f.write("\n")
         f.write("── wrapped_code (as compiled) ──\n")
         f.write(wrapped_code)
@@ -1670,11 +1466,8 @@ def log_parse_failure(
 
     *reason* is a short label for why parse_example returned None:
       json-parse      — could not extract / repair valid JSON
-      no-fix          — broken_code identical to fixed_code (exact or fuzzy)
-      too-short       — one of the code fields is suspiciously short
-      bad-error-code  — error_code not in the canonical set
+      too-short       — the code field is suspiciously short
       missing-fields  — one or more REQUIRED_FIELDS absent
-      broken-compiles — broken_code passes cargo check (not actually broken)
     """
     import datetime
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1724,13 +1517,11 @@ def _hash_file(output_dir: Path, category: str) -> Path:
 def example_hash(record: dict) -> str:
     """
     Compute a stable SHA-256 fingerprint for an example.
-    We hash broken_code + fixed_code after normalisation so that purely
-    cosmetic differences (whitespace, comments, allow-attrs) are ignored —
-    the same logic used by parse_example's no-fix check.
+    We hash code after normalisation so that purely cosmetic differences
+    (whitespace, comments, allow-attrs) are ignored.
     """
-    broken = _normalize_code(record.get("broken_code", ""))
-    fixed  = _normalize_code(record.get("fixed_code",  ""))
-    payload = f"{broken}\x00{fixed}".encode("utf-8")
+    code    = _normalize_code(record.get("code", ""))
+    payload = code.encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -1861,12 +1652,6 @@ def run(args: argparse.Namespace) -> None:
         attempt = 0
         consecutive_failures = 0
         total_cat_fail       = 0   # total failures this category — never resets on success
-        # broken-compiles failures are tracked separately — they don't count
-        # toward the shared MAX_FAILURES limit because they are a model quality
-        # issue (hallucinated error), not a structural problem with the category.
-        broken_compiles_streak = 0
-        _MAX_BROKEN_COMPILES    = 4   # give up on compile-error after this many
-        correction_hint         = ""  # fed back into the next prompt on bc failure
 
         while generated_this_cat < remaining:
             attempt += 1
@@ -1901,8 +1686,7 @@ def run(args: argparse.Namespace) -> None:
                 return False
 
             # ── LLM call ─────────────────────────────────────────────
-            user_prompt = build_user_prompt(cat, attempt=attempt, correction_hint=correction_hint)
-            correction_hint = ""  # reset — only used for one follow-up attempt
+            user_prompt = build_user_prompt(cat, attempt=attempt)
             raw = call_llm(model, user_prompt)
             if raw is None:
                 _fail("llm-error")
@@ -1919,61 +1703,17 @@ def run(args: argparse.Namespace) -> None:
                 if _bail_if_stuck(): break
                 continue
 
-            fixed_code = _ALLOW_ATTR.sub("", _PYTHON_COMMENT.sub("", example.get("fixed_code", ""))).strip().lstrip("\n")
-            if not fixed_code:
-                console.print(f"  [warn]Empty fixed_code (attempt {attempt})[/warn]")
-                _fail("empty-fixed-code")
+            code = _ALLOW_ATTR.sub("", _PYTHON_COMMENT.sub("", example.get("code", ""))).strip().lstrip("\n")
+            if not code:
+                console.print(f"  [warn]Empty code (attempt {attempt})[/warn]")
+                _fail("empty-code")
                 if _bail_if_stuck(): break
                 continue
-
-            broken_code = _ALLOW_ATTR.sub("", _PYTHON_COMMENT.sub("", example.get("broken_code", ""))).strip().lstrip("\n")
-            if not broken_code:
-                console.print(f"  [warn]Empty broken_code (attempt {attempt})[/warn]")
-                _fail("empty-broken-code")
-                if _bail_if_stuck(): break
-                continue
-
-            # ── Broken-code sanity check ──────────────────────────────
-            # For compile-error examples, verify broken_code actually fails
-            # to compile.  If it passes, the model hallucinated the error —
-            # reject cheaply before spending cargo time on fixed_code.
-            if example.get("error_code") == "compile-error":
-                bc_result = check_broken_compiles(broken_code, example.get("crates", []))
-                if bc_result is True:
-                    console.print(
-                        f"  [warn]broken_code compiles cleanly (attempt {attempt}) "
-                        f"[broken-compiles][/warn]"
-                    )
-                    log_parse_failure(cat_name, attempt, model,
-                                      raw, reason="broken-compiles")
-                    broken_compiles_streak += 1
-                    total_fail += 1
-                    total_cat_fail += 1
-                    console.print(
-                        f"  [dim]↳ run total: [ok]{total_ok}[/ok] ok  "
-                        f"[fail]{total_fail}[/fail] failed[/dim]"
-                    )
-                    # Build a correction hint so the next prompt knows what went wrong.
-                    stated_error = example.get("error_message", "").strip()
-                    correction_hint = (
-                        f"broken_code compiled without errors — the stated error "
-                        f"({stated_error!r}) did not actually occur. "
-                        "Choose a different, simpler bug that is guaranteed to fail compilation, "
-                        "or switch to error_code \"logic-bug\" instead."
-                    )
-                    if broken_compiles_streak >= _MAX_BROKEN_COMPILES:
-                        console.print(
-                            f"  [warn]{_MAX_BROKEN_COMPILES} broken-compiles in a row — "
-                            f"skipping category.[/warn]"
-                        )
-                        break
-                    if _bail_if_stuck(): break
-                    continue
 
             # ── Cargo validation ──────────────────────────────────────
             console.print(f"  [dim]Validating with cargo…[/dim]")
             try:
-                val = validate(fixed_code, example.get("crates", []))
+                val = validate(code, example.get("crates", []))
             except Exception as e:
                 console.print(f"  [fail]✗ validate() crashed (attempt {attempt}): {e}[/fail]")
                 _fail("validate-crash")
@@ -1988,7 +1728,7 @@ def run(args: argparse.Namespace) -> None:
                 )
                 log_cargo_failure(
                     cat_name, attempt, model,
-                    raw, fixed_code, val["wrapped_code"], val["errors"],
+                    raw, code, val["wrapped_code"], val["errors"],
                 )
                 _fail("cargo-check")
                 if _bail_if_stuck(): break
@@ -1997,16 +1737,13 @@ def run(args: argparse.Namespace) -> None:
             # ── Build the output record ───────────────────────────────
             record = {
                 "id":               str(uuid.uuid4()),
-                "schema_variant":   "bug_fix",
+                "schema_variant":   "good_code",
                 "source":           "opensource",
                 "category_id":      cat["id"],
                 "category":         cat_name,
                 "difficulty":       example.get("difficulty", cat.get("difficulty", "intermediate")),
                 "prompt":           example["prompt"],
-                "broken_code":      broken_code,
-                "error_message":    example.get("error_message", ""),
-                "error_code":       example.get("error_code", ""),
-                "fixed_code":       fixed_code,
+                "code":             code,
                 "explanation":      example.get("explanation", ""),
                 "concepts":         example.get("concepts", []),
                 "crates":           example.get("crates", []),
@@ -2040,7 +1777,6 @@ def run(args: argparse.Namespace) -> None:
             known_hashes.add(h)
             generated_this_cat  += 1
             total_ok            += 1
-            broken_compiles_streak = 0  # reset on any successful generation
             consecutive_failures   = 0  # successful example clears the streak
             # total_cat_fail is intentionally NOT reset — it is a hard budget
             # for the whole category so a model that barely scrapes by can't
