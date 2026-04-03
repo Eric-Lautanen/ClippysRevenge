@@ -24,6 +24,7 @@ import argparse
 import hashlib
 import json
 import os
+import random
 import re
 import signal
 import subprocess
@@ -91,7 +92,79 @@ EDITION      = "2021"
 LICENSE      = "Apache-2.0"
 MAX_FAILURES     = 3   # skip a category after this many *consecutive* failures
 MAX_CAT_FAILURES = 15  # skip a category after this many *total* failures (never resets)
+
+# Set to True to inject the category's prompt_focus field into every user prompt.
+# This gives the model precise guidance on which sub-concepts to demonstrate.
+# Set to False to test baseline generation quality without the extra context.
+USE_PROMPT_FOCUS: bool = True
+
+# Set to True to run `cargo fmt`, `cargo fix`, and `cargo clippy --fix` on
+# the model's code before validation.  All three tools rewrite main.rs in
+# place; the cleaned code is what gets stored in the dataset.
+# fmt        — fixes all formatting (indentation, spacing, trailing commas …)
+# fix        — applies safe automatic compiler lint suggestions
+# clippy fix — applies Clippy's machine-applicable suggestions on top
+# cargo check / clippy still run afterward so genuinely broken code is still
+# rejected.  Set to False to store the model's output exactly as produced.
+AUTO_FIX_CODE: bool = True
+
+# Set to True to write a rustfmt.toml with stable-only options into each
+# temp project before running cargo fmt.  This normalises import ordering,
+# derive merging, trailing commas, and line width across all examples for a
+# more consistent dataset.  Only stable rustfmt options are used -- no
+# nightly required.  Set to False if the toml causes unexpected fmt failures
+# or if you prefer vanilla rustfmt defaults.
+AUTO_FMT_TOML: bool = True
+
+# Content written to rustfmt.toml in each temp project when AUTO_FMT_TOML is True.
+# All options below are stable on stable rustfmt as of April 2026.
+# Unstable options (imports_granularity, group_imports) are deliberately excluded —
+# they are still nightly-only and have known non-idempotency bugs.
+_RUSTFMT_TOML: str = """# rustfmt.toml -- stable options only (rustfmt stable, April 2026)
+# Injected by generate_examples.py when AUTO_FMT_TOML = True.
+
+# Merge multiple #[derive(...)] attributes into one line.
+merge_derives = true
+
+# Sort use statements alphabetically within each group.
+reorder_imports = true
+
+# Sort mod declarations alphabetically.
+reorder_modules = true
+
+# Collapse empty impl/fn bodies onto a single line where they fit.
+empty_item_single_line = true
+
+# Maximum line width before wrapping (100 is common modern Rust style).
+max_width = 100
+
+# Trailing comma in function args / struct literals when wrapped vertically.
+trailing_comma = "Vertical"
+
+# Use Unix-style newlines regardless of platform.
+newline_style = "Unix"
+"""
+
+# Set to True to enable Stage 2 MCP web-search assisted fixing.
+# When True, cargo check errors that aren't trivial syntax failures are sent to
+# LM Studio's /api/v1/chat endpoint with the 'mcp/web-search' integration so
+# the model can look up the correct fix online before regenerating.
+# Set to False to skip MCP entirely (Stage 1 self-fix only).
+# Prerequisites when True:
+#   • mcp.py registered in LM Studio's mcp.json as "web-search"
+#   • "Allow calling servers from mcp.json" ON in Server Settings
+USE_MCP: bool = False
+
+# How many times Stage 1 (self-fix from cargo check output) will retry before
+# giving up or escalating to Stage 2 MCP search.
+# Each retry calls the model again with the same errors; increasing this gives
+# the model more chances to correct itself at the cost of extra inference time.
+SELF_FIX_RETRIES: int = 5
 SHARED_TARGET_DIR = Path(__file__).parent / "cargo_target"  # shared build cache
+
+# LM Studio API token — set LM_API_TOKEN in the environment if auth is enabled.
+# When auth is disabled in LM Studio Server Settings this value is ignored.
+LM_API_TOKEN: str = os.environ.get("LM_API_TOKEN", "")
 
 # ─────────────────────────────────────────────────────────
 #  CRATE → Cargo.toml DEPENDENCY MAP
@@ -172,22 +245,64 @@ You are a Rust expert generating training data. Output ONE raw JSON object. No m
 
 OUTPUT FORMAT:
 {
-  "category": "Core - Ownership",
-  "difficulty": "intermediate",
-  "prompt": "Demonstrate ownership transfer and cloning in Rust.",
-  "code": "fn main() {\\n    let s = String::from(\\"hello\\");\\n    let t = s.clone();\\n    println!(\\"{}  {}\\", s, t);\\n}",
-  "explanation": "Cloning s before assigning to t lets both variables remain valid. Without clone, the move would make s unavailable.",
-  "concepts": ["ownership", "clone"],
+  "category": "Category here",
+  "difficulty": "beginner|intermediate|hard",
+  "prompt": "The request or question being answered",
+  "code": "Complete Rust code here",
+  "explanation": "Technical explanation of why the code is written this way",
+  "concepts": ["list", "of", "concepts" ],
   "crates": []
 }
 
+PROMPT FIELD RULES — CRITICAL:
+The prompt field is a short, natural developer request. Maximum 2 sentences.
+
+Pick ONE archetype per example. Rotate across all of them:
+
+  DIRECT TASK     — imperative, states exactly what to write
+  IDIOMATIC       — asks for the "right way" to do something
+  DESIGN QUESTION — asks which of two approaches to pick
+  DEBUG SCENARIO  — describes a compiler error or borrow issue to fix
+  SPECIFIC API    — asks how a particular type, method, or trait works
+  COMPARISON      — contrasts two patterns or types
+  CONVERSION      — asks how to transform data from one shape to another
+
+Rules:
+- 1 to 2 sentences. Never more.
+- Vary the opening word. Do not start consecutive prompts with "I".
+- Rust terminology is fine when it fits. Not every prompt needs to hide jargon.
+- Bad: "I'm building a graph traversal system where nodes need to..."  ← scenario setup, too long
+- Bad: "I'm working on a project that involves..."  ← never start this way
+- Bad: "Can you show how to use X to allow Y while ensuring Z?"  ← too many clauses
+
+
 CODE RULES:
+0. NEVER COMMENT THE CODE! NEVER PUT COMMENTS IN THE CODE!!
 1. code must be a complete Rust edition-2021 file with fn main and all use statements.
-2. Only use the crates listed in the user prompt. If none are listed, crates: [].
-3. No #[allow(...)] or #![allow(...)]. Fix warnings properly.
-4. Only use stdlib APIs you are certain exist. Vec/String/Option/Result need no import.
-5. No stub bodies — every function needs a real implementation.
-6. code must be idiomatic Rust — correct, clean, and written the way an experienced Rust developer would write it."""
+2. Keep code SHORT and FOCUSED — 15 to 75 lines is the target. Do not write full applications.
+   One or two small functions plus a fn main that exercises them is the right scope.
+3. Only use the crates listed in the user prompt. If none are listed, crates: [].
+4. No #[allow(...)] or #![allow(...)]. Fix warnings properly.
+5. Only use stdlib APIs you are certain exist. Vec/String/Option/Result need no import.
+6. No stub bodies — every function needs a real implementation.
+7. code must be correct and idiomatic — clear, clean, and focused on demonstrating one concept well.
+8. No comments of any kind — no // line comments, no /* block comments */, no //! or /// doc comments."""
+
+# System prompt used exclusively for self-fix and MCP-fix LLM calls.
+# Kept intentionally minimal: the model must output ONLY corrected Rust source
+# code with no JSON wrapper, no markdown explanation, and no commentary.
+# A heavyweight "training data generator" prompt causes the model to revert to
+# full-schema output instead of just the fixed code.
+SYSTEM_PROMPT_FIX = """\
+You are a Rust compiler expert. Your only job is to fix broken Rust code.
+
+OUTPUT RULES — follow these exactly:
+- Output ONLY the corrected Rust source code.
+- No JSON. No markdown fences. No explanation. No commentary.
+- Do not wrap the code in ```rust or ``` blocks.
+- Do not output anything before or after the code.
+- Fix every compiler error shown. Do not suppress warnings with #[allow(…)].
+- No comments of any kind — no //, no /* */, no ///, no //!. Remove any that exist in the broken code."""
 
 # ── 10 rotating user prompts ──────────────────────────────────────────────────
 # Each entry is a format string. Only {category} is substituted at call time.
@@ -195,65 +310,51 @@ CODE RULES:
 # does not need to appear in the prompt sent to the model.
 
 _USER_PROMPTS: list[str] = [
-    # 1 — concept-first framing
-    'You are generating a Rust training example for the category "{category}".\n'
-    "Write idiomatic, working Rust code that clearly demonstrates a key concept in this category.\n"
-    "explanation should name the specific concept illustrated and explain why the code is written this way.",
+    # 1 — just write the code, explanation is secondary
+    'Write idiomatic Rust code for "{category}". '
+    'The code is the primary deliverable — make it clean, correct, and complete. '
+    'The explanation should justify the key design decisions, not narrate the code line by line.',
 
-    # 2 — best-practice framing
-    'Generate an idiomatic Rust training example for "{category}".\n'
-    "The code should reflect how an experienced Rust developer approaches this category in production.\n"
-    "The explanation must: (1) identify the concept shown, (2) explain what makes this code idiomatic, "
-    "(3) describe any Rust-specific patterns or APIs used.",
+    # 2 — specific angle, not the most obvious one
+    'For "{category}", write a short Rust example that focuses on one specific aspect of the concept — '
+    'not necessarily the first thing someone would reach for. '
+    'The explanation says which aspect is shown and why the code is written this way.',
 
-    # 3 — idiomatic emphasis
-    'Create a Rust training example for the category "{category}".\n'
-    "The code must be what an experienced Rust developer would write — "
-    "not just correct, but idiomatic and clean.\n"
-    "The explanation should describe the Rust-specific reasoning behind the design choices.",
+    # 3 — correct over naive
+    'For "{category}", write the correct Rust solution. '
+    'The explanation briefly notes what a naive attempt might get wrong and why this version avoids it.',
 
-    # 4 — pattern showcase framing
-    'Produce a Rust training example for "{category}" that showcases the canonical pattern '
-    "for this area.\n"
-    "code: a clean, complete demonstration of the right way to handle this concept\n"
-    "explanation: name the pattern explicitly and explain why it is the idiomatic Rust approach",
+    # 4 — practical framing
+    'Write a short, practical Rust snippet for "{category}". '
+    'The code should feel like something you would actually write, not a textbook exercise. '
+    'The explanation states the concept and the reasoning behind the implementation.',
 
-    # 5 — minimal demonstration framing
-    'Write a minimal but complete Rust training example for "{category}".\n'
-    "Illustrate exactly one concept clearly — nothing extraneous.\n"
-    "The explanation must teach the concept, not just describe the code.\n"
-    "A student reading only the explanation should understand the rule and why the code follows it.",
+    # 5 — minimal: one concept, nothing extra
+    'Write the smallest complete Rust program that demonstrates "{category}" unambiguously. '
+    'Remove anything that does not directly serve the concept. '
+    'The explanation names the specific rule or guarantee being demonstrated and why it matters.',
 
-    # 6 — real-world framing
-    'Generate a realistic Rust training example for "{category}".\n'
-    "Imagine a developer writing production code in this area — show the right way to do it.\n"
-    "code: clean, idiomatic, production-quality\n"
-    "explanation: what concept is demonstrated and what makes this the idiomatic approach",
+    # 6 — why this approach
+    'For "{category}", write a short Rust example using the idiomatic approach. '
+    'The explanation names the approach chosen and why it is the right one here.',
 
-    # 7 — rule-demonstration framing
-    'Create a Rust training example for "{category}" that clearly demonstrates '
-    "the core Rust rule or idiom for this area.\n"
-    "explanation: focus on the specific Rust rule or idiom the code embodies and why it matters",
+    # 7 — constraint-aware
+    'Write a short Rust example for "{category}" that respects one natural constraint of the concept '
+    '(e.g. avoiding unnecessary clones, staying in safe Rust, not allocating). '
+    'The explanation names the constraint and how the code satisfies it.',
 
-    # 8 — teaching-through-example framing
-    'For the category "{category}", write a Rust training example designed to teach the concept '
-    "through a clear, well-structured demonstration.\n"
-    "code should make the concept visible and easy to reason about.\n"
-    "explanation connects the code structure to the underlying Rust concept.",
+    # 8 — goal-driven
+    'For "{category}", write a short Rust example that accomplishes one specific, named goal. '
+    'The explanation connects the implementation back to that goal.',
 
-    # 9 — specification-driven framing
-    'Generate a Rust training example for "{category}".\n'
-    "Identify: (1) the specific rule or API in this category being demonstrated, "
-    "(2) how code applies it correctly, (3) what makes this the idiomatic choice.\n"
-    "The explanation must be detailed enough that a model trained on it learns the rule.",
+    # 9 — API/trait surface focus
+    'Write a short Rust example for "{category}" that shows the relevant API or trait in use. '
+    'The explanation names the API and why it fits here.',
 
-    # 10 — step-by-step reasoning framing
-    'Produce a Rust training example for "{category}" using this process:\n'
-    "1. Identify a specific, important concept in this category\n"
-    "2. Write code that demonstrates it clearly and idiomatically\n"
-    "3. Write an explanation that names the concept, explains why the code is written this way, "
-    "and states the Rust rule or idiom it follows\n"
-    "The explanation is the most important field — it is what trains the model.",
+    # 10 — performance or correctness rationale
+    'For "{category}", write Rust code where the implementation choice is driven by either a correctness guarantee '
+    'or a performance property (pick whichever is more relevant to the concept). '
+    'The explanation must name that property explicitly and explain how the code achieves it.',
 ]
 
 # ── Category → required crates ────────────────────────────────────────────────
@@ -313,6 +414,10 @@ def build_user_prompt(
     Build a user prompt for the given category + attempt number by cycling
     through 10 rotating templates. Only {category} is substituted — the id
     is stored in the output record (category_id) and never sent to the model.
+
+    When USE_PROMPT_FOCUS is True and the category has a prompt_focus field,
+    that text is appended so the model knows exactly which sub-concepts to
+    demonstrate.  Toggle USE_PROMPT_FOCUS in constants to compare quality.
     """
     category = cat["category"]
 
@@ -320,6 +425,17 @@ def build_user_prompt(
     # template, and retries never land on the same one.
     idx     = (attempt - 1) % len(_USER_PROMPTS)
     prompt  = _USER_PROMPTS[idx].format(category=category)
+
+    # ── Optional prompt_focus injection ──────────────────────────────────────
+    if USE_PROMPT_FOCUS:
+        focus = cat.get("prompt_focus", "").strip()
+        if focus:
+            prompt += (
+                f'\n\nConcept focus for "{category}":\n'
+                f'{focus}\n'
+                f'Make sure the code and explanation clearly demonstrate one or more '
+                f'of these specific aspects.'
+            )
 
     cat_crates = _crates_for_category(cat)
     if cat_crates:
@@ -331,6 +447,11 @@ def build_user_prompt(
     else:
         prompt += '\nNo external crates. Set "crates": [].'
 
+    prompt += (
+        '\n\nFor the "prompt" field: pick one archetype from the system prompt (direct-task, '
+        'idiomatic, design-question, debug-scenario, real-world-impl, code-review, specific-API, '
+        'constraint, comparison, or conversion) and write a concrete, natural request that fits it.'
+    )
     prompt += '\n\nOutput the JSON object now.'
     return prompt
 
@@ -425,18 +546,25 @@ def unload_model(instance_id: str) -> bool:
         return False
 
 
-def call_llm(model_id: str, user_prompt: str) -> Optional[str]:
+def call_llm(
+    model_id: str,
+    user_prompt: str,
+    system_prompt: str = SYSTEM_PROMPT,
+) -> Optional[str]:
     """
     Stream a completion from LM Studio.  Returns the full response text
     with <think> blocks stripped, or None on error.
 
     Thinking tokens are shown live on a single overwriting line.
     Output tokens stream directly to stdout.
+
+    Pass system_prompt=SYSTEM_PROMPT_FIX for fix-stage calls so the model
+    outputs only corrected Rust code instead of the full JSON schema.
     """
     payload = {
         "model":       model_id,
         "messages":    [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_prompt},
         ],
         "temperature": TEMPERATURE,
@@ -466,9 +594,13 @@ def call_llm(model_id: str, user_prompt: str) -> Optional[str]:
         sys.stdout.flush()
 
     try:
+        _auth_headers: dict[str, str] = {}
+        if LM_API_TOKEN:
+            _auth_headers["Authorization"] = f"Bearer {LM_API_TOKEN}"
         with requests.post(
             f"{API_OAI}/chat/completions",
             json=payload,
+            headers=_auth_headers,
             stream=True,
             timeout=REQ_TIMEOUT,
         ) as resp:
@@ -541,6 +673,193 @@ def call_llm(model_id: str, user_prompt: str) -> Optional[str]:
         sys.stdout.write("\n")
         console.print(f"[fail]API error: {e}[/fail]")
         return None
+
+
+# ─────────────────────────────────────────────────────────
+#  MCP-ASSISTED CARGO FIX
+# ─────────────────────────────────────────────────────────
+
+# Errors that are pure codegen failures — mismatched braces, unclosed strings,
+# etc. Web search cannot help with these; skip MCP and go straight to self-fix
+# or discard.
+_TRIVIAL_ERROR_PATTERNS = re.compile(
+    r"unexpected (closing|opening) delimiter"
+    r"|this file contains an un-closed delimiter"
+    r"|unterminated (string|character|block comment)"
+    r"|expected expression, found `\}`"
+    r"|aborting due to \d+ previous errors?"
+    r"|expected one of .* found end of file",
+    re.IGNORECASE,
+)
+
+
+def _is_trivial_error(errors: list[str]) -> bool:
+    """Return True if ALL errors are pure syntax failures that web search can't fix."""
+    if not errors:
+        return False
+    return all(_TRIVIAL_ERROR_PATTERNS.search(e) for e in errors)
+
+
+def search_cargo_fix_via_mcp(
+    errors: list[str],
+    failed_code: str,
+    model_id: str,
+) -> Optional[str]:
+    """
+    Send cargo check errors + failed code to LM Studio's /api/v1/chat endpoint
+    with the 'mcp/web-search' MCP server attached.  The model will call the
+    web-search tools in mcp.py to find how to fix the Rust compiler errors and
+    return a plain-text summary of the fix.
+
+    Returns the model's text response (fix guidance), or None on any error.
+
+    Prerequisites:
+      • mcp.py must be registered in LM Studio's mcp.json as "web-search"
+      • "Allow calling servers from mcp.json" must be ON in Server Settings
+    """
+    error_text   = "\n".join(errors)[:2000]
+    code_preview = failed_code[:1500]
+
+    prompt = (
+        "I have Rust code that fails `cargo check` with the following errors:\n\n"
+        f"```\n{error_text}\n```\n\n"
+        f"Failed code:\n```rust\n{code_preview}\n```\n\n"
+        "Please search the web to find the correct fix for these specific Rust compiler "
+        "errors.  Focus on:\n"
+        "1. The root cause of each error code shown above.\n"
+        "2. The idiomatic Rust way to fix it (correct API usage, missing imports, "
+        "wrong types, borrow-checker fixes, etc.).\n"
+        "3. A concrete corrected code snippet if available.\n\n"
+        "Return a concise, actionable fix summary."
+    )
+
+    payload = {
+        "model":          model_id,
+        "input":          prompt,
+        "integrations":   ["mcp/web-search"],
+        "context_length": CTX_LENGTH,
+        "temperature":    0.1,
+    }
+
+    # Only send Authorization if a non-empty token is configured.
+    # If LM Studio auth is disabled, omit the header entirely.
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if LM_API_TOKEN:
+        headers["Authorization"] = f"Bearer {LM_API_TOKEN}"
+
+    try:
+        console.print(f"  [info]🔍 Querying MCP web-search for compiler fix…[/info]")
+        r = requests.post(
+            f"{API_V1}/chat",
+            json=payload,
+            headers=headers,
+            timeout=REQ_TIMEOUT,
+        )
+        if r.status_code == 403:
+            console.print(
+                "  [warn]MCP fix: 403 Forbidden — check two things in LM Studio Server Settings:[/warn]\n"
+                "  [warn]  1. 'Allow calling servers from mcp.json' must be ON[/warn]\n"
+                "  [warn]  2. Set LM_API_TOKEN env var to match your API token (or disable auth)[/warn]"
+            )
+            return None
+        r.raise_for_status()
+        data = r.json()
+
+        # /api/v1/chat returns {"output": [{type, content}, …]}
+        output_blocks = data.get("output", [])
+        text_parts = [
+            b["content"]
+            for b in output_blocks
+            if b.get("type") == "message" and b.get("content", "").strip()
+        ]
+        result = "\n\n".join(text_parts).strip()
+        if result:
+            console.print(f"  [info]✓ MCP returned fix guidance ({len(result)} chars)[/info]")
+        return result or None
+
+    except requests.exceptions.ConnectionError:
+        console.print("  [warn]MCP fix search: cannot connect to LM Studio API v1.[/warn]")
+        return None
+    except Exception as e:
+        console.print(f"  [warn]MCP fix search error: {e}[/warn]")
+        return None
+
+
+def call_llm_self_fix(
+    model_id: str,
+    example: dict,
+    errors: list[str],
+) -> Optional[str]:
+    """
+    Stage 1 fix — no MCP needed.
+
+    Asks the model to return ONLY corrected Rust code (no JSON).
+    The caller merges the fixed code back into the original example,
+    preserving prompt, explanation, and all other fields unchanged.
+    """
+    error_text = "\n".join(errors)[:3000]
+    code       = example.get("code", "")
+
+    prompt = (
+        "The Rust code below fails `cargo check` with these errors:\n\n"
+        f"```\n{error_text}\n```\n\n"
+        "Broken code:\n"
+        f"```rust\n{code}\n```\n\n"
+        "Fix every error shown above."
+    )
+
+    console.print("  [info]↻ Stage 1: self-fix using cargo error output…[/info]")
+    return call_llm(model_id, prompt, system_prompt=SYSTEM_PROMPT_FIX)
+
+
+def call_llm_with_fix(
+    model_id: str,
+    example: dict,
+    errors: list[str],
+    fix_info: str,
+) -> Optional[str]:
+    """
+    Stage 2 fix — uses MCP web-search results.
+
+    Asks the model to return ONLY corrected Rust code (no JSON).
+    The caller merges the fixed code back into the original example,
+    preserving prompt, explanation, and all other fields unchanged.
+    """
+    error_text  = "\n".join(errors)[:2000]
+    code        = example.get("code", "")
+    fix_preview = fix_info[:2500]
+
+    prompt = (
+        "The Rust code below still fails `cargo check`:\n\n"
+        f"```\n{error_text}\n```\n\n"
+        "Broken code:\n"
+        f"```rust\n{code}\n```\n\n"
+        "Research on how to fix these errors:\n"
+        f"{fix_preview}\n\n"
+        "Fix every error shown above."
+    )
+
+    console.print("  [info]↻ Stage 2: regenerating with MCP web-search context…[/info]")
+    return call_llm(model_id, prompt, system_prompt=SYSTEM_PROMPT_FIX)
+
+
+def _extract_fix_code(response: str) -> Optional[str]:
+    """
+    Pull Rust code out of a fix-stage response that should contain code only.
+    Handles: raw code, ```rust fences, ``` fences, code preceded by a prose line.
+    """
+    if not response:
+        return None
+    # Strip think blocks if present
+    response = _THINK_BLOCK.sub("", response).strip()
+    # Prefer a fenced rust block
+    m = re.search(r"```(?:rust)?\s*\n(.*?)```", response, re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    # Fall back: if the response looks like raw Rust (starts with use/fn/struct/pub etc.)
+    if re.match(r"\s*(use |fn |pub |struct |enum |impl |//|#\[)", response):
+        return response.strip()
+    return None
 
 
 # ─────────────────────────────────────────────────────────
@@ -1185,6 +1504,9 @@ _TOP_LEVEL   = re.compile(
 
 _PYTHON_COMMENT  = re.compile(r"^#(?!\[)\s.*$", re.MULTILINE)
 _ALLOW_ATTR      = re.compile(r"^[ \t]*#!?\[allow\([^\)]*\)\][ \t]*\n?", re.MULTILINE)
+# Strips backslashes the model sometimes emits before Rust keywords inside JSON strings.
+# e.g. "\nimpl" in a JSON string can parse as "\n" + "\impl" (invalid escape → stray backslash).
+_STRAY_BACKSLASH = re.compile(r"\\(?=[a-zA-Z_])")
 _MISSING_DEBUG   = re.compile(r"E0277|doesn't implement `Debug`")
 _STRUCT_ENUM_DEF = re.compile(r"^(\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum)\s)", re.MULTILINE)
 
@@ -1240,6 +1562,8 @@ def _run(cmd: list[str], cwd: Path, timeout: int = 120, env: dict | None = None)
             cwd=str(cwd),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             env=env,
         )
@@ -1286,15 +1610,25 @@ def _detect_msrv(code: str) -> str:
 def _autopatch_debug(code: str) -> str:
     """
     Insert #[derive(Debug)] before every struct/enum definition that
-    doesn't already have Debug in a derive attribute on the preceding line.
+    doesn't already have Debug in any derive attribute in the preceding
+    attribute block (handles multi-attribute structs correctly).
     """
     lines = code.splitlines(keepends=True)
     out: list[str] = []
     for line in lines:
-        stripped = line.lstrip()
         if _STRUCT_ENUM_DEF.match(line):
-            prev = out[-1].strip() if out else ""
-            if "Debug" not in prev:
+            # Walk backward through the accumulated output to check the
+            # full preceding attribute block, not just the immediate line.
+            already_has_debug = False
+            for prev_line in reversed(out):
+                stripped = prev_line.strip()
+                if not stripped or stripped.startswith("#["):
+                    if "Debug" in stripped:
+                        already_has_debug = True
+                        break
+                else:
+                    break  # hit a non-attribute line — stop looking
+            if not already_has_debug:
                 out.append("#[derive(Debug)]\n")
         out.append(line)
     return "".join(out)
@@ -1324,11 +1658,12 @@ def validate(code: str, declared_crates: list[str]) -> dict:
         "min_rust_version": "1.56.0",
         "compiler_ver": "", "has_unsafe": False,
         "wrapped_code": code, "errors": [],
+        "auto_fixed": False,   # True when cargo fmt / fix rewrote the code
     }
 
     # Detect compiler version once
     try:
-        rv = subprocess.run(["rustc", "--version"], capture_output=True, text=True, timeout=10)
+        rv = subprocess.run(["rustc", "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
         result["compiler_ver"] = rv.stdout.strip()
     except Exception:
         pass
@@ -1352,6 +1687,53 @@ def validate(code: str, declared_crates: list[str]) -> dict:
         src.mkdir()
         (src / "main.rs").write_text(wrapped, encoding="utf-8")
 
+        # ── Auto-fix: cargo fmt + cargo fix + cargo clippy --fix ─────
+        # All three tools run before cargo check so stored code is already clean.
+        # Each rewrites main.rs in place; we read it back once at the end.
+        if AUTO_FIX_CODE:
+            # ── Optional rustfmt.toml ───────────────────────────
+            # Inject a rustfmt.toml with stable-only options before running
+            # cargo fmt.  All options below are on stable rustfmt as of 2026.
+            # Note: imports_granularity / group_imports are still UNSTABLE and
+            # have known non-idempotency bugs -- deliberately excluded.
+            # Set AUTO_FMT_TOML = False at the top of this file to disable.
+            if AUTO_FMT_TOML:
+                (proj / "rustfmt.toml").write_text(_RUSTFMT_TOML, encoding="utf-8")
+
+            # cargo fmt — reformat unconditionally (always safe)
+            _run(["cargo", "fmt"], proj, env=cargo_env)
+
+            # cargo fix -- applies safe automatic lint suggestions.
+            # --allow-dirty because the working tree isn't a git repo.
+            # --allow-no-vcs for the same reason.
+            _run(
+                ["cargo", "fix", "--allow-dirty", "--allow-no-vcs"],
+                proj, env=cargo_env,
+            )
+
+            # cargo clippy --fix -- applies Clippy's machine-applicable lint
+            # suggestions automatically (needless clones, redundant closures,
+            # map_or patterns, etc.) that cargo fix alone doesn't touch.
+            # Runs after cargo fix so both passes compose cleanly.
+            # We intentionally ignore the return code -- clippy --fix exits
+            # non-zero when it applies suggestions it can't fully verify;
+            # cargo check below is the real pass/fail gate.
+            _run(
+                [
+                    "cargo", "clippy", "--fix",
+                    "--allow-dirty", "--allow-no-vcs",
+                    "--", "-W", "clippy::all",
+                ],
+                proj, env=cargo_env,
+            )
+
+            # Read back whatever the tools produced
+            fixed_code = (src / "main.rs").read_text(encoding="utf-8")
+            if fixed_code != wrapped:
+                result["auto_fixed"] = True
+                wrapped = fixed_code
+                result["wrapped_code"] = wrapped
+
         # ── cargo check ──────────────────────────────────────────────
         r = _run(["cargo", "check", "--quiet", "--color=never"], proj, env=cargo_env)
         if r.returncode != 0:
@@ -1364,6 +1746,13 @@ def validate(code: str, declared_crates: list[str]) -> dict:
                     if r2.returncode == 0:
                         wrapped = patched
                         result["wrapped_code"] = wrapped
+                        # Re-run fmt so the injected #[derive(Debug)] is formatted
+                        # consistently and fmt --check passes in the validation step.
+                        _run(["cargo", "fmt"], proj, env=cargo_env)
+                        patched_fmt = (src / "main.rs").read_text(encoding="utf-8")
+                        if patched_fmt != wrapped:
+                            wrapped = patched_fmt
+                            result["wrapped_code"] = wrapped
                     else:
                         result["errors"] = [r.stderr.strip()]
                         return result
@@ -1703,7 +2092,7 @@ def run(args: argparse.Namespace) -> None:
                 if _bail_if_stuck(): break
                 continue
 
-            code = _ALLOW_ATTR.sub("", _PYTHON_COMMENT.sub("", example.get("code", ""))).strip().lstrip("\n")
+            code = _STRAY_BACKSLASH.sub("", _ALLOW_ATTR.sub("", _PYTHON_COMMENT.sub("", example.get("code", "")))).strip().lstrip("\n")
             if not code:
                 console.print(f"  [warn]Empty code (attempt {attempt})[/warn]")
                 _fail("empty-code")
@@ -1726,13 +2115,74 @@ def run(args: argparse.Namespace) -> None:
                     f"  [fail]✗ cargo check failed (attempt {attempt})[/fail]  "
                     f"[dim]{err_preview}[/dim]"
                 )
-                log_cargo_failure(
-                    cat_name, attempt, model,
-                    raw, code, val["wrapped_code"], val["errors"],
-                )
-                _fail("cargo-check")
-                if _bail_if_stuck(): break
-                continue
+
+                # ── 3-stage fix cascade ────────────────────────────────
+                # Stage 1: send full JSONL + cargo output back — model
+                #          self-corrects from rustc's own error messages.
+                # Stage 2: MCP web search for the error, then regenerate
+                #          with the full JSONL + errors + web fix info.
+                # Stage 3: give up, log, count as failure.
+
+                def _try_fix(fix_raw: Optional[str], label: str) -> bool:
+                    """Extract fixed code, validate it, merge into original example.
+                    All fields other than code are preserved from the original."""
+                    nonlocal code, val, example
+                    fix_code = _extract_fix_code(fix_raw or "")
+                    if not fix_code:
+                        return False
+                    fix_code = _STRAY_BACKSLASH.sub("", _ALLOW_ATTR.sub(
+                        "", _PYTHON_COMMENT.sub("", fix_code)
+                    )).strip().lstrip("\n")
+                    if not fix_code:
+                        return False
+                    try:
+                        fix_val = validate(fix_code, example.get("crates", []))
+                    except Exception as _e:
+                        console.print(f"  [warn]{label} validate() error: {_e}[/warn]")
+                        return False
+                    if fix_val["build"]:
+                        console.print(f"  [ok]✓ {label} succeeded[/ok]")
+                        code    = fix_code
+                        val     = fix_val
+                        example = {**example, "code": fix_code}
+                        return True
+                    console.print(f"  [warn]{label} still failed cargo check[/warn]")
+                    return False
+
+                _fixed = False
+
+                # Stage 1 — self-fix from cargo output (no MCP), up to SELF_FIX_RETRIES attempts
+                for _retry in range(1, SELF_FIX_RETRIES + 1):
+                    label = f"Stage 1 self-fix (attempt {_retry}/{SELF_FIX_RETRIES})"
+                    _fixed = _try_fix(
+                        call_llm_self_fix(model, example, val["errors"]),
+                        label,
+                    )
+                    if _fixed:
+                        break
+
+                # Stage 2 — MCP web search + regenerate (skip when USE_MCP is False or
+                # errors are pure syntax failures that web search cannot help with)
+                if not _fixed and USE_MCP and not _is_trivial_error(val["errors"]):
+                    fix_info = search_cargo_fix_via_mcp(
+                        val["errors"], val["wrapped_code"], model
+                    )
+                    if fix_info:
+                        _fixed = _try_fix(
+                            call_llm_with_fix(model, example, val["errors"], fix_info),
+                            "Stage 2 MCP-fix",
+                        )
+
+                # Stage 3 — give up
+                if not _fixed:
+                    log_cargo_failure(
+                        cat_name, attempt, model,
+                        raw, code, val["wrapped_code"], val["errors"],
+                    )
+                    _fail("cargo-check")
+                    if _bail_if_stuck(): break
+                    continue
+                # _fixed == True → fall through to build the output record
 
             # ── Build the output record ───────────────────────────────
             record = {
@@ -1756,6 +2206,7 @@ def run(args: argparse.Namespace) -> None:
                     "test":          False,
                     "clippy_lints":  val["clippy_lints"],
                     "clippy_output": val["clippy_output"],
+                    "auto_fixed":    val.get("auto_fixed", False),
                 },
                 "verified_at":       str(int(time.time())),
                 "compiler_ver":      val["compiler_ver"],
@@ -1805,16 +2256,279 @@ def run(args: argparse.Namespace) -> None:
 
             clippy_badge = "[ok]✓ clippy[/ok]" if val["clippy"] else "[warn]~ clippy warn[/warn]"
             fmt_badge    = "[ok]✓ fmt[/ok]"    if val["fmt"]    else "[warn]~ fmt[/warn]"
+            fix_badge    = "[info]~ auto-fixed[/info]" if val.get("auto_fixed") else ""
             msrv_info    = f"  msrv={val['min_rust_version']}" if val["msrv"] else ""
             console.print(
                 f"  [ok]✓ build[/ok]  {clippy_badge}  {fmt_badge}"
-                f"{msrv_info}"
+                + (f"  {fix_badge}" if fix_badge else "")
+                + f"{msrv_info}"
                 f"  [dim]{cat_name} #{existing + generated_this_cat}[/dim]"
                 f"  [dim]↳ run total: [ok]{total_ok}[/ok] ok  "
                 f"[fail]{total_fail}[/fail] failed[/dim]"
             )
 
         console.print()
+
+    # ── Continuous weighted loop ───────────────────────────────────────────────
+    # After the initial pass fills every category to its target_entries, if
+    # --continuous is set we keep generating indefinitely.  Categories are chosen
+    # randomly weighted by their `weight` field (falls back to `target_entries`,
+    # then 1).  This naturally gives important categories more examples over time
+    # while ensuring every category grows.
+    if args.continuous and not args.category:
+        console.print(
+            "\n[warn]Initial pass complete — entering continuous weighted mode. "
+            "Press Ctrl+C to stop.[/warn]\n"
+        )
+
+        # Build a stable weight list (recalculated once per outer iteration so
+        # editing the JSONL mid-run takes effect on the next pass through here,
+        # though in practice we never reload the file — weights are fixed at
+        # startup which is fine for a weeks-long run).
+        cat_weights = [
+            float(c.get("weight", c.get("target_entries", 1)) or 1)
+            for c in categories
+        ]
+
+        # Per-category consecutive-failure and total-failure counters survive
+        # across the continuous loop so a persistently broken category is skipped.
+        cont_consec_fail: dict[str, int] = {c["category"]: 0 for c in categories}
+        cont_total_fail:  dict[str, int] = {c["category"]: 0 for c in categories}
+
+        def _try_fix_cont(fix_raw: Optional[str], label: str) -> bool:
+            """Extract fixed code, validate it, merge into the current example.
+            Defined once outside the loop — captures code/val/example via nonlocal
+            on each invocation so the closure always sees the live variables."""
+            nonlocal code, val, example
+            fix_code = _extract_fix_code(fix_raw or "")
+            if not fix_code:
+                return False
+            fix_code = _STRAY_BACKSLASH.sub("", _ALLOW_ATTR.sub(
+                "", _PYTHON_COMMENT.sub("", fix_code)
+            )).strip().lstrip("\n")
+            if not fix_code:
+                return False
+            try:
+                fix_val = validate(fix_code, example.get("crates", []))
+            except Exception:
+                return False
+            if fix_val["build"]:
+                console.print(f"  [ok]✓ {label} succeeded[/ok]")
+                code    = fix_code
+                val     = fix_val
+                example = {**example, "code": fix_code}
+                return True
+            console.print(f"  [warn]{label} still failed cargo check[/warn]")
+            return False
+
+        continuous_pass = 0
+        while True:
+            continuous_pass += 1
+
+            # Weighted random pick — respects keyboard interrupt
+            cat = random.choices(categories, weights=cat_weights, k=1)[0]
+            cat_name = cat["category"]
+
+            # Skip categories that have burned through their failure budgets
+            if cont_consec_fail[cat_name] >= MAX_FAILURES:
+                console.print(
+                    f"[dim]Skipping {cat_name!r} "
+                    f"({MAX_FAILURES} consecutive failures in continuous mode)[/dim]"
+                )
+                # Guard: if every category is locked out, exit rather than spin forever
+                active = [
+                    c["category"] for c in categories
+                    if cont_consec_fail[c["category"]] < MAX_FAILURES
+                    and cont_total_fail[c["category"]] < MAX_CAT_FAILURES
+                ]
+                if not active:
+                    console.print(
+                        "[fail]All categories are locked out by failure limits "
+                        "— exiting continuous mode.[/fail]"
+                    )
+                    break
+                continue
+            if cont_total_fail[cat_name] >= MAX_CAT_FAILURES:
+                console.print(
+                    f"[dim]Skipping {cat_name!r} "
+                    f"({MAX_CAT_FAILURES} total failures in continuous mode)[/dim]"
+                )
+                # Same guard as above
+                active = [
+                    c["category"] for c in categories
+                    if cont_consec_fail[c["category"]] < MAX_FAILURES
+                    and cont_total_fail[c["category"]] < MAX_CAT_FAILURES
+                ]
+                if not active:
+                    console.print(
+                        "[fail]All categories are locked out by failure limits "
+                        "— exiting continuous mode.[/fail]"
+                    )
+                    break
+                continue
+
+            out_path = output_path(output_dir, cat_name)
+
+            # Count existing so the summary line is accurate
+            existing_cont = 0
+            if out_path.exists():
+                with open(out_path, encoding="utf-8") as _f:
+                    existing_cont = sum(1 for ln in _f if ln.strip())
+
+            known_hashes_cont: set[str] = load_hashes(output_dir, cat_name)
+
+            console.print(
+                f"  [dim][continuous #{continuous_pass}][/dim]  "
+                f"[cat]{cat_name}[/cat]  "
+                f"[dim]({existing_cont} existing)[/dim]"
+            )
+
+            user_prompt = build_user_prompt(cat, attempt=continuous_pass)
+            raw = call_llm(model, user_prompt)
+            if raw is None:
+                cont_consec_fail[cat_name] += 1
+                cont_total_fail[cat_name]  += 1
+                total_fail += 1
+                continue
+
+            example = parse_example(raw)
+            if example is None:
+                cont_consec_fail[cat_name] += 1
+                cont_total_fail[cat_name]  += 1
+                total_fail += 1
+                continue
+
+            code = _STRAY_BACKSLASH.sub("", _ALLOW_ATTR.sub(
+                "", _PYTHON_COMMENT.sub("", example.get("code", ""))
+            )).strip().lstrip("\n")
+            if not code:
+                cont_consec_fail[cat_name] += 1
+                cont_total_fail[cat_name]  += 1
+                total_fail += 1
+                continue
+
+            try:
+                val = validate(code, example.get("crates", []))
+            except Exception as _e:
+                console.print(f"  [fail]validate() crashed: {_e}[/fail]")
+                cont_consec_fail[cat_name] += 1
+                cont_total_fail[cat_name]  += 1
+                total_fail += 1
+                continue
+
+            if not val["build"]:
+                err_preview = val["errors"][0][:120] if val["errors"] else "unknown"
+                console.print(
+                    f"  [fail]✗ cargo check failed[/fail]  [dim]{err_preview}[/dim]"
+                )
+                # ── 3-stage fix cascade (mirrors initial pass) ────
+                _fixed_cont = False
+
+                # Stage 1 — self-fix from cargo output (no MCP), up to SELF_FIX_RETRIES attempts
+                for _retry in range(1, SELF_FIX_RETRIES + 1):
+                    label = f"Stage 1 self-fix (attempt {_retry}/{SELF_FIX_RETRIES})"
+                    _fixed_cont = _try_fix_cont(
+                        call_llm_self_fix(model, example, val["errors"]),
+                        label,
+                    )
+                    if _fixed_cont:
+                        break
+
+                # Stage 2 — MCP web search + regenerate (skip when USE_MCP is False or
+                # errors are pure syntax failures that web search cannot help with)
+                if not _fixed_cont and USE_MCP and not _is_trivial_error(val["errors"]):
+                    fix_info = search_cargo_fix_via_mcp(
+                        val["errors"], val["wrapped_code"], model
+                    )
+                    if fix_info:
+                        _fixed_cont = _try_fix_cont(
+                            call_llm_with_fix(model, example, val["errors"], fix_info),
+                            "Stage 2 MCP-fix",
+                        )
+
+                if not _fixed_cont:
+                    log_cargo_failure(
+                        cat_name, continuous_pass, model,
+                        raw, code, val["wrapped_code"], val["errors"],
+                    )
+                    cont_consec_fail[cat_name] += 1
+                    cont_total_fail[cat_name]  += 1
+                    total_fail += 1
+                    continue
+
+            # Hash before building the full record (same key used by example_hash internally).
+            h = example_hash({"code": code})
+            if h in known_hashes_cont:
+                console.print(f"  [warn]Duplicate — skipping[/warn]")
+                cont_consec_fail[cat_name] += 1
+                cont_total_fail[cat_name]  += 1
+                total_fail += 1
+                continue
+
+            record = {
+                "id":               str(uuid.uuid4()),
+                "schema_variant":   "good_code",
+                "source":           "opensource",
+                "category_id":      cat["id"],
+                "category":         cat_name,
+                "difficulty":       example.get("difficulty", cat.get("difficulty", "intermediate")),
+                "prompt":           example["prompt"],
+                "code":             code,
+                "explanation":      example.get("explanation", ""),
+                "concepts":         example.get("concepts", []),
+                "crates":           example.get("crates", []),
+                "edition":          EDITION,
+                "source_model":     model,
+                "validation": {
+                    "fmt":           val["fmt"],
+                    "clippy":        val["clippy"],
+                    "build":         val["build"],
+                    "test":          False,
+                    "clippy_lints":  val["clippy_lints"],
+                    "clippy_output": val["clippy_output"],
+                    "auto_fixed":    val.get("auto_fixed", False),
+                },
+                "verified_at":       str(int(time.time())),
+                "compiler_ver":      val["compiler_ver"],
+                "min_rust_version":  val["min_rust_version"],
+                "has_unsafe":        val["has_unsafe"],
+                "license":           LICENSE,
+            }
+
+            write_example(out_path, record)
+            save_hash(output_dir, cat_name, h)
+            known_hashes_cont.add(h)
+            total_ok += 1
+            cont_consec_fail[cat_name] = 0   # success resets consecutive streak
+
+            clippy_badge = "[ok]✓ clippy[/ok]" if val["clippy"] else "[warn]~ clippy warn[/warn]"
+            fmt_badge    = "[ok]✓ fmt[/ok]"    if val["fmt"]    else "[warn]~ fmt[/warn]"
+            console.print(
+                f"  [ok]✓ build[/ok]  {clippy_badge}  {fmt_badge}"
+                f"  [dim]{cat_name} #{existing_cont + 1}[/dim]"
+                f"  [dim]↳ run total: [ok]{total_ok}[/ok] ok  "
+                f"[fail]{total_fail}[/fail] failed[/dim]"
+            )
+
+            # Cooldown applies in continuous mode too
+            if cooldown_every > 0 and total_ok % cooldown_every == 0:
+                console.print(
+                    f"\n[warn]Cooldown after {total_ok} generations — "
+                    f"unloading model for {cooldown_secs}s…[/warn]"
+                )
+                unload_model(instance_id)
+                _active_iid = None
+                for remaining_s in range(cooldown_secs, 0, -5):
+                    console.print(f"  [dim]{remaining_s}s remaining…[/dim]", end="\r")
+                    time.sleep(min(5, remaining_s))
+                console.print(f"  [dim]Reloading model…[/dim]" + " " * 20, end="\r")
+                new_iid = load_model(model) if args.model else None
+                if new_iid:
+                    instance_id = new_iid
+                    _active_iid = new_iid
+                else:
+                    console.print(f"[warn]Model reload failed — continuing.[/warn]")
+                console.print(f"[ok]Cooldown done. Resuming.[/ok]" + " " * 20)
 
     console.print(
         f"[ok]Done.[/ok]  Generated: [ok]{total_ok}[/ok]  "
@@ -1875,6 +2589,16 @@ def main() -> None:
         default=60,
         metavar="S",
         help="Seconds to pause during cooldown (default: 60)",
+    )
+    p.add_argument(
+        "--continuous",
+        action="store_true",
+        help=(
+            "Never stop after filling initial targets. "
+            "Keep generating indefinitely using weighted category selection "
+            "(weight = category\'s target_entries, or \'weight\' field if present). "
+            "Stop with Ctrl+C."
+        ),
     )
     args = p.parse_args()
     run(args)
