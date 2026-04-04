@@ -15,7 +15,7 @@ Usage:
     python generate_frontier.py --model "model-id" --category "Core - Move Semantics on Function Call"
     python generate_frontier.py --model "model-id" --cooldown-every 50 --cooldown-secs 60
     python generate_frontier.py --categories rust_categories.jsonl --output-dir datasets/local
-    python generate_frontier.py --model "tesslate_tessa-rust-t1-7b" --categories rust_categories.jsonl --output-dir datasets/local
+    python generate_frontier.py --model "tesslate_tessa-rust-t1-7b" --categories rust_categories.jsonl --output-dir data/examples
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ signal.signal(signal.SIGINT, _handle_sigint)
 LM_BASE      = "http://localhost:1234"
 API_OAI      = f"{LM_BASE}/v1"
 API_V1       = f"{LM_BASE}/api/v1"
-TEMPERATURE  = 0.5
+TEMPERATURE  = 0.75
 MAX_TOKENS   = 8192
 REQ_TIMEOUT  = 240
 CTX_LENGTH   = 8192
@@ -91,12 +91,12 @@ LOAD_TIMEOUT = 120
 EDITION      = "2021"
 LICENSE      = "Apache-2.0"
 MAX_FAILURES     = 3   # skip a category after this many *consecutive* failures
-MAX_CAT_FAILURES = 15  # skip a category after this many *total* failures (never resets)
+MAX_CAT_FAILURES = 5  # skip a category after this many *total* failures (never resets)
 
 # Set to True to inject the category's prompt_focus field into every user prompt.
 # This gives the model precise guidance on which sub-concepts to demonstrate.
 # Set to False to test baseline generation quality without the extra context.
-USE_PROMPT_FOCUS: bool = True
+USE_PROMPT_FOCUS: bool = False
 
 # Set to True to run `cargo fmt`, `cargo fix`, and `cargo clippy --fix` on
 # the model's code before validation.  All three tools rewrite main.rs in
@@ -240,14 +240,14 @@ CRATE_MAP: dict[str, str] = {
 #  LLM PROMPTS
 # ─────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a Rust expert data generator. Your ONLY output must be a single, raw JSON object. Do not include markdown formatting, code fences (```), or any conversational text.
+SYSTEM_PROMPT = """You are a Rust expert, senior dev. Your ONLY output must be a single, raw JSON object. Do not include markdown formatting, code fences (```), or any conversational text.
 
 OUTPUT SCHEMA:
 {
   "category": "Broad topic (e.g., File I/O, Data Structures)",
   "difficulty": "beginner|intermediate|advanced",
   "prompt": "Max 2 sentences. Write as a non-Rust programmer Googling a generic problem. Use plain English. (Example: 'I need to group items by their name' instead of 'How do I use a HashMap').",
-  "code": "Complete, working Rust 2021 code. 15-50 lines. Must include fn main().",
+  "code": "Complete, working Rust 2021 code. 15-50 lines. Must compile!",
   "explanation": "Brief reasoning for why this code is idiomatic.",
   "concepts": ["concept1", "concept2"],
   "crates": ["crate_name"] // Leave empty if stdlib only
@@ -256,7 +256,9 @@ OUTPUT SCHEMA:
 STRICT CODE RULES:
 1. NO COMMENTS ALLOWED: The "code" string must contain zero comments. Remove all //, /*, ///, and //!.
 2. MUST COMPILE: Code must be idiomatic, complete, and warning-free. Do not use #[allow(...)].
-3. COMPLETE: Include all necessary `use` statements. No stubbed functions."""
+3. COMPLETE: Include all necessary `use` statements. No stubbed functions.
+4. MUST BE ACTUAL CODE. NO CONCEPTS OR EXAMPLES.
+5. DOMAIN-SPECIFIC: The code must be an example of a real world application.  No "Hello World" or toy scripts."""
 
 SYSTEM_PROMPT_FIX = """\
 You are a Rust compiler expert. Your only job is to fix broken Rust code.
@@ -269,61 +271,365 @@ OUTPUT RULES — follow these exactly:
 - Fix every compiler error shown. Do not suppress warnings with #[allow(…)].
 - No comments of any kind — no //, no /* */, no ///, no //!. Remove any that exist in the broken code."""
 
-# ── 10 rotating user prompts ──────────────────────────────────────────────────
-# Each entry is a format string. Only {category} is substituted at call time.
-# The category id is stored in the output JSONL record (category_id field) and
-# does not need to appear in the prompt sent to the model.
+# ── 100 domain-specific coding project contexts ───────────────────────────────
+# Injected randomly into user prompts to force variety in the generated examples.
+# Each entry describes a real-world project where the Rust category would matter.
+
+_CODING_CONTEXTS: list[str] = [
+    # Systems / Infrastructure
+    "a Linux process monitor that streams CPU and memory stats in real time",
+    "a custom memory allocator for a game engine",
+    "a lightweight container runtime (like a tiny Docker)",
+    "a cross-platform system tray application",
+    "a kernel module loader that validates ELF binaries before exec",
+    "a packet sniffer for a home network security tool",
+    "a bare-metal embedded firmware for an IoT sensor node",
+    "a USB HID driver for a custom input device",
+    "a bootloader for a small RISC-V dev board",
+    "a hypervisor that runs sandboxed WebAssembly modules",
+    # CLI Tools
+    "a CLI password manager that encrypts vaults locally",
+    "a git-log analyzer that produces burndown charts in the terminal",
+    "a fast recursive file search tool (like ripgrep but smaller)",
+    "a command-line CSV transformer with regex column filters",
+    "a dotfile manager that symlinks configs across machines",
+    "a terminal Pomodoro timer with desktop notifications",
+    "a CLI tool that batch-renames photos based on EXIF date",
+    "a cross-platform port scanner with colorized output",
+    "a local secret scanner that checks git history for leaked keys",
+    "a diff-and-patch tool for binary firmware images",
+    # Networking / Servers
+    "a high-throughput HTTP/2 reverse proxy",
+    "a WebSocket chat server handling thousands of concurrent rooms",
+    "a DNS resolver with a local cache and DNSSEC validation",
+    "a gRPC gateway that translates REST calls to protobuf messages",
+    "a SOCKS5 proxy with per-connection traffic shaping",
+    "a toy SMTP server that queues and delivers email locally",
+    "an mTLS API gateway for a microservice mesh",
+    "a rate-limiter middleware for an Axum-based REST API",
+    "a lightweight load balancer using consistent hashing",
+    "a pub/sub message broker inspired by NATS",
+    # Databases / Storage
+    "a write-ahead log (WAL) engine for a custom key-value store",
+    "a time-series database optimized for IoT telemetry",
+    "a columnar storage engine with run-length encoding",
+    "a B-tree index implementation for an embedded database",
+    "a log-structured merge tree (LSM) storage backend",
+    "a distributed consensus module using Raft",
+    "a Redis-compatible in-memory cache server",
+    "a SQLite extension that adds vector similarity search",
+    "a backup tool that deduplicates file chunks with a rolling hash",
+    "a graph database with BFS/DFS query primitives",
+    # Parsers / Compilers / Languages
+    "a Markdown-to-HTML renderer with custom extension syntax",
+    "a JSON5 parser that preserves comments for config files",
+    "a TOML linter and auto-formatter",
+    "a simple Lisp interpreter with a REPL",
+    "a stack-based bytecode VM for a scripting language",
+    "a Pratt parser for a toy expression language",
+    "a CSS minifier and property sorter",
+    "a template engine with Jinja2-compatible syntax",
+    "a source map generator for a transpiler",
+    "a protobuf schema validator and diff tool",
+    # Web / APIs
+    "a server-side rendered blog engine with an Axum backend",
+    "a REST API for a task management app with JWT auth",
+    "a GraphQL server with DataLoader-style batching",
+    "a webhook dispatcher that retries failed deliveries with backoff",
+    "an OpenAPI spec validator and code-gen tool",
+    "a static site generator that hot-reloads on file change",
+    "a URL shortener service backed by a local SQLite DB",
+    "a headless CMS API with role-based access control",
+    "a server-sent events (SSE) feed for a live sports scoreboard",
+    "a multipart file upload handler with virus scanning integration",
+    # Games / Simulation
+    "a 2D tile-based game engine with an ECS architecture",
+    "a physics simulation for rigid body collisions",
+    "a procedural dungeon generator using cellular automata",
+    "a real-time strategy game server handling unit pathfinding",
+    "a chess engine with alpha-beta pruning",
+    "a Conway's Game of Life simulation running on the GPU via WGPU",
+    "a Tetris clone with a pluggable AI bot interface",
+    "a particle system renderer for a game special effects library",
+    "a replay recorder and playback system for a multiplayer game",
+    "a voxel world engine with greedy meshing",
+    # Data / ML / Science
+    "a fast CSV ingestion pipeline for a data warehouse",
+    "a neural network inference engine for ONNX models",
+    "a distributed map-reduce job runner",
+    "a data frame library with lazy evaluation",
+    "a feature store that computes embeddings on the fly",
+    "a time-series anomaly detector using z-score sliding windows",
+    "a Monte Carlo simulation for options pricing",
+    "a bioinformatics tool that aligns DNA sequences with Smith-Waterman",
+    "a geospatial index using an R-tree for spatial queries",
+    "a streaming statistics library (mean, variance, quantiles) over sensor data",
+    # Security / Crypto
+    "a certificate transparency log monitor",
+    "a hardware security key (FIDO2/WebAuthn) library",
+    "a fuzzing harness for a file format parser",
+    "a zero-knowledge proof verifier for a toy protocol",
+    "an end-to-end encrypted messaging protocol (Signal-style)",
+    "a TLS 1.3 handshake implementation from scratch",
+    "a JWT library with pluggable signing algorithms",
+    "a secure multi-party computation (MPC) demo for private set intersection",
+    "a post-quantum key encapsulation module (Kyber)",
+    "a memory-safe sandbox for executing untrusted Wasm plugins",
+    # Tooling / DevOps
+    "a build system with incremental compilation and dependency tracking",
+    "a CI pipeline runner that executes jobs in isolated namespaces",
+    "a log aggregator that tails multiple files and ships to Elasticsearch",
+    "a distributed tracing exporter (OpenTelemetry compatible)",
+    "a config file watcher that hot-reloads app settings without restart",
+    "a Kubernetes operator that reconciles custom resource definitions",
+    "a container image layer analyzer and size optimizer",
+    "a chaos engineering agent that randomly kills processes under load",
+    "a benchmark harness for comparing serialization formats",
+    "a plugin system where third-party extensions are loaded as shared libraries",
+]
+
+# ── 30 rotating user prompts ──────────────────────────────────────────────────
+# Each entry is a format string. {category} and {context} are substituted at
+# call time. {context} is drawn randomly from _CODING_CONTEXTS so each
+# generation gets a different real-world angle even within the same category.
+#
+# VOICE RULE: Every prompt must read as someone who has NEVER written Rust
+# before. They are coming from Python, JavaScript, Go, or no background at
+# all. They do not know Rust terms, idioms, or concepts. They only know what
+# they want the program to DO.
 
 _USER_PROMPTS: list[str] = [
-    # 1 — Plain outcome
-    "TOPIC: {category}\n\n"
-    "TASK: For the JSON 'prompt' field, act like a non-programmer who just wants a simple outcome. "
-    "Use plain English. Zero Rust jargon. Just state the goal.",
+    # 1 — Python dev picking up Rust for the first time
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a Python developer trying Rust for "
+    "the first time. They know how to do this in Python but have no idea how Rust works. "
+    "They describe what they want the program to do for their project in plain Python-brained "
+    "terms. No Rust vocabulary whatsoever.",
 
-    # 2 — Everyday problem
-    "TOPIC: {category}\n\n"
-    "TASK: For the JSON 'prompt' field, describe a real-world, everyday situation a normal person "
-    "would recognize (like reading files or formatting text). No Rust terminology.",
+    # 2 — JavaScript dev completely lost
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a JavaScript developer who just "
+    "installed Rust for the first time and is completely lost. They describe what they "
+    "want to happen in their project using JavaScript concepts (callbacks, objects, arrays) "
+    "and ask for help achieving it. No Rust terms.",
 
-    # 3 — Fix it
-    "TOPIC: {category}\n\n"
-    "TASK: For the JSON 'prompt' field, complain about something being broken, crashing, or acting weird. "
-    "Ask for a fix in plain English without using any Rust jargon.",
+    # 3 — total beginner, never programmed in a systems language
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as someone who has only ever used "
+    "high-level scripting languages (Python, Ruby, PHP) and is trying Rust for the first "
+    "time because they heard it was fast. They describe the problem in their project "
+    "in plain everyday English. Zero systems programming vocabulary.",
 
-    # 4 — I want to build something
-    "TOPIC: {category}\n\n"
-    "TASK: For the JSON 'prompt' field, describe a small tool or feature you want to build. "
-    "Explain it like you are talking to a friend. Zero technical Rust terms.",
+    # 4 — Go developer who expected Rust to be similar
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a Go developer who assumed Rust would "
+    "work the same way — they describe how they'd solve it in Go and ask why Rust seems "
+    "so different for their project. No Rust jargon. They only speak in Go terms.",
 
-    # 5 — Data in, data out
-    "TOPIC: {category}\n\n"
-    "TASK: For the JSON 'prompt' field, describe a data calculation in plain English. "
-    "State what goes in and what should come out. Do not mention types or traits.",
+    # 5 — heard Rust was fast, decided to rewrite everything
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as someone who decided to rewrite their "
+    "Python project in Rust because they read it was fast, and now they're completely "
+    "stuck on the first real thing they need to do. Describe the stuck moment in plain "
+    "English. No Rust terminology.",
 
-    # 6 — Make it faster / safer / simpler
-    "TOPIC: {category}\n\n"
-    "TASK: For the JSON 'prompt' field, ask how to make the code faster, safer, or simpler. "
-    "Use plain English. Do not use any Rust vocabulary.",
+    # 6 — copy-pasting from tutorials but it's not working
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a Rust newcomer who has been "
+    "copy-pasting tutorial code and modifying it for their project, but it stopped "
+    "working and they don't understand why. They describe what they're trying to do "
+    "in plain English. No Rust vocabulary.",
 
-    # 7 — How do I do this common task
-    "TOPIC: {category}\n\n"
-    "TASK: For the JSON 'prompt' field, write a 'how do I...' question the way someone would type it "
-    "into a search engine. No Rust-specific terms.",
+    # 7 — asking a friend who knows Rust
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as someone texting a friend who knows "
+    "Rust — very casual, describes what they need for their project in everyday language, "
+    "admits they just started learning. The friend speaks Rust; they don't. No Rust terms.",
 
-    # 8 — Comparing approaches
-    "TOPIC: {category}\n\n"
-    "TASK: For the JSON 'prompt' field, ask which of two plain-English approaches is better for speed "
-    "or simplicity. Do not name any Rust constructs.",
+    # 8 — data scientist trying to speed up their pipeline
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a data scientist who knows Python and "
+    "NumPy but was told to try Rust for performance in their project. They describe the "
+    "data problem in plain terms. No Rust vocabulary — only data/math language.",
 
-    # 9 — Converting or transforming
-    "TOPIC: {category}\n\n"
-    "TASK: For the JSON 'prompt' field, describe a transformation in plain terms (e.g., 'I have X and I want Y'). "
+    # 9 — frontend dev building their first backend in Rust
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a frontend developer (React, TypeScript) "
+    "writing their first backend service in Rust for their project. They describe what "
+    "the server needs to do using web/frontend vocabulary. No Rust terms.",
+
+    # 10 — sysadmin replacing a bash script
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a sysadmin who has been told to stop "
+    "writing bash scripts and use Rust instead. They describe what their script did for "
+    "their project in shell-script terms (pipes, grep, files) and ask how to do the "
+    "same thing. No Rust vocabulary.",
+
+    # 11 — student working on a class project
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a CS student assigned to use Rust "
+    "for their class project for the first time. They know C or Java from class but "
+    "describe what they need in plain terms. Slightly stressed. No Rust jargon.",
+
+    # 12 — game modder who wants to write native code
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a game modder or Lua scripter who "
+    "wants to move into native code with Rust for their project. They describe game "
+    "logic or mod behavior in plain gamer/scripter terms. No Rust vocabulary.",
+
+    # 13 — 'the Rust book confused me'
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as someone who tried reading The Rust "
+    "Book, got confused, closed it, and is now just asking for working code for their "
+    "project. They describe what they want to happen in plain outcome-focused English. "
+    "No Rust terms.",
+
+    # 14 — DevOps engineer writing their first CLI tool in Rust
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a DevOps engineer who usually writes "
+    "Python scripts and Terraform configs but is trying Rust for a CLI tool in their "
+    "project. They describe the tool's behavior in infrastructure/ops language. "
+    "No Rust vocabulary.",
+
+    # 15 — mobile developer trying desktop/systems for the first time
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as an iOS or Android developer "
+    "branching out into desktop or systems programming with Rust for their project. "
+    "They describe the feature in mobile app terms (background task, state, events). "
     "No Rust terminology.",
 
-    # 10 — Something should just work
-    "TOPIC: {category}\n\n"
-    "TASK: For the JSON 'prompt' field, write a short, direct request expecting working code back. "
-    "Write it as someone with zero knowledge of how Rust works internally."
+    # 16 — frustrated that Rust won't let them do what Python would
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a Python developer frustrated that "
+    "Rust won't let them do something that 'just works' in Python. They describe the "
+    "thing they're trying to do for their project and complain that Rust keeps "
+    "blocking them. No Rust jargon — only Python comparisons.",
+
+    # 17 — read a Hacker News post and got excited
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as someone who got hyped reading a "
+    "Hacker News post about Rust being fast/safe and decided to try it for their "
+    "project right away, with zero preparation. They describe what they want to build "
+    "in enthusiastic but non-technical terms. No Rust vocabulary.",
+
+    # 18 — switching from C, scared of memory bugs
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a C developer who is tired of "
+    "memory bugs and segfaults in their project and has heard Rust prevents them. "
+    "They describe what they were doing in C terms (malloc, pointer, struct) and "
+    "ask how to do the same thing safely. No Rust-specific vocabulary.",
+
+    # 19 — building a side project to learn Rust
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as someone who picked Rust as a "
+    "weekend learning project and chose something fun to build. They describe what "
+    "feature they want to add next in plain terms and admit they're still figuring "
+    "out the basics. Casual and curious. No Rust jargon.",
+
+    # 20 — 'my coworker said just use Rust'
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as someone whose coworker told them "
+    "'just rewrite it in Rust' without explaining anything. They describe what their "
+    "project does and what they need the code to accomplish, completely blind to Rust "
+    "conventions. Mildly exasperated. No Rust terms.",
+
+    # 21 — Java developer baffled by no garbage collector
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a Java or C# developer confused "
+    "that Rust doesn't have a garbage collector. They describe what they want to do "
+    "for their project using OOP terms (class, object, method, interface) and ask "
+    "how it works. No Rust vocabulary.",
+
+    # 22 — 'I just need it to not crash when two things happen at once'
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a newcomer whose project falls "
+    "apart when multiple things happen at the same time. They don't know what "
+    "concurrency means — they just describe the symptom in plain English and "
+    "ask for code that handles it. No Rust terms.",
+
+    # 23 — scientist who knows MATLAB and nothing else
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a scientist or engineer who only "
+    "knows MATLAB or R and is trying Rust for a performance-critical part of their "
+    "project. They describe the computation in math/matrix terms. No Rust vocabulary.",
+
+    # 24 — just wants a small program to do one thing
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as someone who just wants a small "
+    "standalone program that does exactly one useful thing for their project. "
+    "They describe the input, the output, and the behavior. No theory, no Rust terms, "
+    "just a plain description of what they want.",
+
+    # 25 — non-technical founder who learned to code
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a non-technical founder who learned "
+    "to code via bootcamp (JavaScript/Python) and is attempting Rust for the performance "
+    "needs of their startup project. Plain outcome-focused language. No Rust vocabulary.",
+
+    # 26 — embedded/hardware person coming from C
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a hardware engineer who writes "
+    "firmware in C and is trying Rust on a new embedded project. They describe what "
+    "the hardware needs to do in electronics/firmware terms (registers, interrupts, GPIO). "
+    "No Rust vocabulary.",
+
+    # 27 — first Rust project after finishing a tutorial
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as someone who just finished a '30 "
+    "minutes of Rust' tutorial and is now trying to build something real. They hit "
+    "the first wall immediately and describe what they want in plain English. "
+    "Slightly overwhelmed. No Rust jargon.",
+
+    # 28 — PHP/WordPress developer going low-level
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a PHP or WordPress developer who "
+    "wants to build something fast and native for their project. They describe what "
+    "they want using web/server terms (request, response, database, query). "
+    "No Rust vocabulary.",
+
+    # 29 — 'I followed a YouTube tutorial and now I'm stuck'
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as someone who followed a YouTube "
+    "Rust tutorial until it ended and then tried to go further on their own project "
+    "and got stuck immediately. They describe what they're trying to do next in "
+    "plain English. No Rust terms.",
+
+    # 30 — Ruby developer who thinks everything should be magic
+    "TOPIC: {category}\n"
+    "PROJECT: {context}\n\n"
+    "TASK: For the JSON 'prompt' field, write it as a Ruby or Rails developer confused "
+    "that Rust doesn't just 'figure it out.' They describe what they want their project "
+    "to do in Ruby-speak (block, method, hash, symbol) and ask why it's so hard. "
+    "No Rust vocabulary.",
 ]
 
 # ── Category → required crates ────────────────────────────────────────────────
@@ -380,9 +686,11 @@ def build_user_prompt(
     attempt: int = 1,
 ) -> str:
     """
-    Build a user prompt for the given category + attempt number by cycling
-    through 10 rotating templates. Only {category} is substituted — the id
-    is stored in the output record (category_id) and never sent to the model.
+    Build a user prompt for the given category + attempt number.
+
+    Picks a random prompt template AND a random domain-specific project
+    context from _CODING_CONTEXTS, so every generation has a different
+    voice and real-world angle even within the same category.
 
     When USE_PROMPT_FOCUS is True and the category has a prompt_focus field,
     that text is appended so the model knows exactly which sub-concepts to
@@ -390,10 +698,11 @@ def build_user_prompt(
     """
     category = cat["category"]
 
-    # Rotate deterministically: each (category, attempt) pair picks a distinct
-    # template, and retries never land on the same one.
-    idx     = (attempt - 1) % len(_USER_PROMPTS)
-    prompt  = _USER_PROMPTS[idx].format(category=category)
+    # Random selection — no deterministic cycling so consecutive retries
+    # on the same category always land on a different template+context pair.
+    template = random.choice(_USER_PROMPTS)
+    context  = random.choice(_CODING_CONTEXTS)
+    prompt   = template.format(category=category, context=context)
 
     # ── Optional prompt_focus injection ──────────────────────────────────────
     if USE_PROMPT_FOCUS:
@@ -1762,72 +2071,20 @@ def validate(code: str, declared_crates: list[str]) -> dict:
 #  OUTPUT
 # ─────────────────────────────────────────────────────────
 
-_SCRIPT_DIR     = Path(__file__).resolve().parent
-_CARGO_FAIL_LOG  = _SCRIPT_DIR / "frontier_cargo_failures.log"
-_PARSE_FAIL_LOG  = _SCRIPT_DIR / "frontier_parse_failures.log"
-_SEP = "═" * 72
+_CAT_FAILURE_LOG = Path(__file__).resolve().parent / "category_failures.jsonl"
 
 
-def log_cargo_failure(
-    cat_name: str,
-    attempt: int,
-    model: str,
-    raw: str,
-    code: str,
-    wrapped_code: str,
-    errors: list[str],
-) -> None:
-    """Append a cargo check failure record to frontier_cargo_failures.log."""
+def log_category_failure(cat: dict, model: str) -> None:
+    """Append a JSONL record when MAX_CAT_FAILURES is hit for a category."""
     import datetime
-    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(_CARGO_FAIL_LOG, "a", encoding="utf-8") as f:
-        f.write(f"\n{_SEP}\n")
-        f.write(f"  {ts}  cat={cat_name!r}  attempt={attempt}  model={model}\n")
-        f.write(f"{_SEP}\n")
-        f.write("── raw LLM output ──\n")
-        f.write(raw if raw else "<empty>")
-        if raw and not raw.endswith("\n"):
-            f.write("\n")
-        f.write("── code (as submitted) ──\n")
-        f.write(code)
-        if not code.endswith("\n"):
-            f.write("\n")
-        f.write("── wrapped_code (as compiled) ──\n")
-        f.write(wrapped_code)
-        if not wrapped_code.endswith("\n"):
-            f.write("\n")
-        f.write("── cargo check output ──\n")
-        for err in errors:
-            f.write(err)
-            if not err.endswith("\n"):
-                f.write("\n")
-        f.write(f"{_SEP} END {_SEP}\n")
-
-
-def log_parse_failure(
-    cat_name: str,
-    attempt: int,
-    model: str,
-    raw: str,
-    reason: str = "json-parse",
-) -> None:
-    """Append a JSON parse failure record to frontier_parse_failures.log.
-
-    *reason* is a short label for why parse_example returned None:
-      json-parse      — could not extract / repair valid JSON
-      too-short       — the code field is suspiciously short
-      missing-fields  — one or more REQUIRED_FIELDS absent
-    """
-    import datetime
-    ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with open(_PARSE_FAIL_LOG, "a", encoding="utf-8") as f:
-        f.write(f"\n{_SEP}\n")
-        f.write(f"  {ts}  cat={cat_name!r}  attempt={attempt}  model={model}  reason={reason}\n")
-        f.write(f"{_SEP}\n")
-        f.write(raw if raw else "<empty response>")
-        if raw and not raw.endswith("\n"):
-            f.write("\n")
-        f.write(f"{_SEP} END {_SEP}\n")
+    record = {
+        "timestamp":   datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "category":    cat["category"],
+        "category_id": cat["id"],
+        "model":       model,
+    }
+    with open(_CAT_FAILURE_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def safe_filename(name: str) -> str:
@@ -2025,12 +2282,14 @@ def run(args: argparse.Namespace) -> None:
                         f"  [warn]{MAX_FAILURES} consecutive failures — "
                         f"skipping category.[/warn]"
                     )
+                    log_category_failure(cat, model)
                     return True
                 if total_cat_fail >= MAX_CAT_FAILURES:
                     console.print(
                         f"  [warn]{MAX_CAT_FAILURES} total failures this category — "
                         f"skipping category.[/warn]"
                     )
+                    log_category_failure(cat, model)
                     return True
                 return False
 
@@ -2047,7 +2306,6 @@ def run(args: argparse.Namespace) -> None:
             if example is None:
                 reason = _last_reject_reason
                 console.print(f"  [warn]JSON parse failed (attempt {attempt})  [{reason}][/warn]")
-                log_parse_failure(cat_name, attempt, model, raw, reason=reason)
                 _fail(reason)
                 if _bail_if_stuck(): break
                 continue
@@ -2135,10 +2393,6 @@ def run(args: argparse.Namespace) -> None:
 
                 # Stage 3 — give up
                 if not _fixed:
-                    log_cargo_failure(
-                        cat_name, attempt, model,
-                        raw, code, val["wrapped_code"], val["errors"],
-                    )
                     _fail("cargo-check")
                     if _bail_if_stuck(): break
                     continue
@@ -2295,6 +2549,7 @@ def run(args: argparse.Namespace) -> None:
                     f"[dim]Skipping {cat_name!r} "
                     f"({MAX_FAILURES} consecutive failures in continuous mode)[/dim]"
                 )
+                log_category_failure(cat, model)
                 # Guard: if every category is locked out, exit rather than spin forever
                 active = [
                     c["category"] for c in categories
@@ -2313,6 +2568,7 @@ def run(args: argparse.Namespace) -> None:
                     f"[dim]Skipping {cat_name!r} "
                     f"({MAX_CAT_FAILURES} total failures in continuous mode)[/dim]"
                 )
+                log_category_failure(cat, model)
                 # Same guard as above
                 active = [
                     c["category"] for c in categories
@@ -2407,10 +2663,6 @@ def run(args: argparse.Namespace) -> None:
                         )
 
                 if not _fixed_cont:
-                    log_cargo_failure(
-                        cat_name, continuous_pass, model,
-                        raw, code, val["wrapped_code"], val["errors"],
-                    )
                     cont_consec_fail[cat_name] += 1
                     cont_total_fail[cat_name]  += 1
                     total_fail += 1
