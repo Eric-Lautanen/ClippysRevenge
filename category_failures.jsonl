@@ -22,3 +22,4 @@
 {"timestamp": "2026-04-03 20:33:05", "category": "Closures - Higher-Order Functions", "category_id": "164b5f163f48", "model": "gemma-4-e4b-it"}
 {"timestamp": "2026-04-03 21:42:09", "category": "Iterators - flat_map and flatten", "category_id": "e40923c0f886", "model": "gemma-4-e4b-it"}
 {"timestamp": "2026-04-03 21:57:37", "category": "Iterators - zip and unzip", "category_id": "27992e14d97d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-03 22:09:44", "category": "Iterators - take, skip, step_by", "category_id": "4c009586427e", "model": "gemma-4-e4b-it"}
