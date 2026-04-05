@@ -1,0 +1,4 @@
+{"timestamp": "2026-04-05 11:29:46", "category": "Traits - impl Trait in Return Position (RPIT)", "category_id": "fcfcfcda9331", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-05 11:42:52", "category": "Generics - Monomorphization", "category_id": "90eb0aca15d7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-05 12:01:36", "category": "Generics - Generic Associated Types (GATs)", "category_id": "b0e9b9ed9f3e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-05 12:29:20", "category": "Generics - Turbofish Syntax", "category_id": "dcedb397f46d", "model": "gemma-4-e4b-it"}
