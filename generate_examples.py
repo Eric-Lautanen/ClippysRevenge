@@ -93,6 +93,14 @@ LICENSE      = "Apache-2.0"
 MAX_FAILURES     = 3   # skip a category after this many *consecutive* failures
 MAX_CAT_FAILURES = 5  # skip a category after this many *total* failures (never resets)
 
+# ── Remote server retry settings ──────────────────────────────────────────────
+# Used by _post_with_retry() to survive transient network blips or host reboots
+# on a remote GPU instance (e.g. Vast.ai).  Does NOT retry on HTTP 4xx errors
+# (bad request / auth) — only on connection failures and HTTP 5xx.
+REMOTE_RETRY_ATTEMPTS = 5      # total attempts (1 original + 4 retries)
+REMOTE_RETRY_BACKOFF  = 10.0   # seconds to wait before first retry
+REMOTE_RETRY_MAX_WAIT = 120.0  # cap — backoff doubles each attempt up to this
+
 # Set to True to inject the category's prompt_focus field into every user prompt.
 # This gives the model precise guidance on which sub-concepts to demonstrate.
 # Set to False to test baseline generation quality without the extra context.
@@ -726,6 +734,72 @@ def build_user_prompt(
 
 
 # ─────────────────────────────────────────────────────────
+#  REMOTE RETRY HELPER
+# ─────────────────────────────────────────────────────────
+
+def _post_with_retry(
+    url: str,
+    *,
+    json: Optional[dict] = None,
+    headers: Optional[dict] = None,
+    stream: bool = False,
+    timeout: float = REQ_TIMEOUT,
+) -> requests.Response:
+    """
+    Drop-in wrapper around requests.post with exponential-backoff retry.
+
+    Retries on:
+      • requests.exceptions.ConnectionError  (server down / network blip)
+      • requests.exceptions.Timeout          (server overloaded / restarting)
+      • HTTP 5xx responses                   (server-side error)
+
+    Does NOT retry on HTTP 4xx (bad request, auth failure) — those are
+    caller bugs that retrying won't fix.
+
+    Raises the final exception / calls raise_for_status() if all attempts
+    are exhausted so callers can handle it as before.
+    """
+    wait = REMOTE_RETRY_BACKOFF
+    last_exc: Optional[Exception] = None
+
+    for attempt in range(1, REMOTE_RETRY_ATTEMPTS + 1):
+        try:
+            resp = requests.post(
+                url,
+                json=json,
+                headers=headers or {},
+                stream=stream,
+                timeout=timeout,
+            )
+            # Retry on 5xx, propagate everything else (including 4xx) immediately
+            if resp.status_code >= 500:
+                raise requests.exceptions.HTTPError(
+                    f"HTTP {resp.status_code}", response=resp
+                )
+            return resp
+
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.HTTPError,
+        ) as exc:
+            last_exc = exc
+            if attempt == REMOTE_RETRY_ATTEMPTS:
+                break
+            console.print(
+                f"  [warn]⚠ Request failed (attempt {attempt}/{REMOTE_RETRY_ATTEMPTS}): "
+                f"{exc}[/warn]"
+            )
+            console.print(f"  [warn]  Retrying in {wait:.0f}s…[/warn]")
+            time.sleep(wait)
+            wait = min(wait * 2, REMOTE_RETRY_MAX_WAIT)
+
+    # All attempts exhausted — re-raise so the caller's existing error
+    # handling (ConnectionError → None, etc.) still works correctly.
+    raise last_exc  # type: ignore[misc]
+
+
+# ─────────────────────────────────────────────────────────
 #  LM STUDIO API
 # ─────────────────────────────────────────────────────────
 
@@ -866,7 +940,7 @@ def call_llm(
         _auth_headers: dict[str, str] = {}
         if LM_API_TOKEN:
             _auth_headers["Authorization"] = f"Bearer {LM_API_TOKEN}"
-        with requests.post(
+        with _post_with_retry(
             f"{API_OAI}/chat/completions",
             json=payload,
             headers=_auth_headers,
@@ -1018,7 +1092,7 @@ def search_cargo_fix_via_mcp(
 
     try:
         console.print(f"  [info]🔍 Querying MCP web-search for compiler fix…[/info]")
-        r = requests.post(
+        r = _post_with_retry(
             f"{API_V1}/chat",
             json=payload,
             headers=headers,
