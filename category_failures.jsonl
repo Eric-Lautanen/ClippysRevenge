@@ -27,3 +27,46 @@
 {"timestamp": "2026-04-06 06:01:49", "category": "Threading - Atomic Operations", "category_id": "bbd1c00f92be", "model": "gemma-4-e4b-it"}
 {"timestamp": "2026-04-06 06:18:56", "category": "Threading - Condvar for Signaling", "category_id": "e0fb712e6483", "model": "gemma-4-e4b-it"}
 {"timestamp": "2026-04-06 06:47:34", "category": "Threading - Thread-Local Storage", "category_id": "27a21c1b67a0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-06 11:19:32", "category": "Error Handling - Propagating Errors Across Threads", "category_id": "5984407311fa", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-06 11:27:42", "category": "Error Handling - miette for Rich Diagnostics", "category_id": "428e681c2602", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-06 11:38:00", "category": "Error Handling - eyre for Spantrace", "category_id": "af7c5b5b7d23", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-06 12:07:52", "category": "Strings - SmolStr and CompactString", "category_id": "04f3aa9eb186", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-06 12:30:37", "category": "Collections - SmallVec and ArrayVec", "category_id": "78e32ea32beb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-06 12:36:53", "category": "Collections - Typed Arena Allocation", "category_id": "501ed08e4234", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-06 12:44:01", "category": "IO - Temporary Files", "category_id": "29819e8d7455", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-06 13:05:52", "category": "Threading - Atomic Operations", "category_id": "bbd1c00f92be", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 02:13:46", "category": "Error Handling - miette for Rich Diagnostics", "category_id": "428e681c2602", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 02:22:04", "category": "Error Handling - eyre for Spantrace", "category_id": "af7c5b5b7d23", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 02:30:25", "category": "Strings - SmolStr and CompactString", "category_id": "04f3aa9eb186", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 02:37:20", "category": "Collections - SmallVec and ArrayVec", "category_id": "78e32ea32beb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 02:43:35", "category": "Collections - Typed Arena Allocation", "category_id": "501ed08e4234", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 02:54:22", "category": "IO - Temporary Files", "category_id": "29819e8d7455", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 03:07:05", "category": "Async - Future Trait", "category_id": "daf96c2f6e46", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 03:21:43", "category": "Async - async fn and await", "category_id": "ba6350a38009", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 03:35:46", "category": "Async - async-trait Crate", "category_id": "ebcb357d62c3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 03:43:17", "category": "Async - Buffered Concurrency", "category_id": "f50c55be0279", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 04:02:39", "category": "Terminal - Progress Bars with indicatif", "category_id": "44d3b224bb64", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 04:35:02", "category": "Terminal - Table Formatting with comfy-table", "category_id": "6797e16584f5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 04:42:21", "category": "Terminal - TUI with ratatui", "category_id": "81a2365ed7f5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 04:58:47", "category": "Unsafe - Raw Pointers", "category_id": "c2324ab14550", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 05:16:15", "category": "Unsafe - Writing Safe Abstractions", "category_id": "4cc931d7f3ea", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 05:31:24", "category": "Unsafe - Transmute and Reinterpretation", "category_id": "df3dab93f783", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 05:43:27", "category": "Unsafe - Implementing Vec from Scratch", "category_id": "1b4758b92222", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 05:52:08", "category": "Unsafe - Implementing a Linked List", "category_id": "af7897134322", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 05:59:24", "category": "Unsafe - Union Types", "category_id": "3528965bbdd4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 06:20:07", "category": "FFI - Calling C from Rust", "category_id": "ce8acfa61ddc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 06:40:05", "category": "FFI - Calling Rust from C", "category_id": "a99844761872", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 06:45:22", "category": "FFI - String Handling Across FFI", "category_id": "82d74e4e313f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 06:56:23", "category": "FFI - bindgen Workflow", "category_id": "4e82eba03736", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 07:05:41", "category": "FFI - Node.js Bindings with napi-rs", "category_id": "3b9b171a9133", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 07:17:21", "category": "Performance - SIMD with std::arch", "category_id": "df6acc43d70e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 08:01:01", "category": "Performance - Caching and Memoization", "category_id": "69b068217ed5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 08:27:36", "category": "Macros - Declarative macro_rules!", "category_id": "0b46b51734e9", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 08:45:12", "category": "Macros - Procedural Macro Setup", "category_id": "73fa7905e92a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 08:57:41", "category": "Macros - Custom Derive Macro", "category_id": "021129e9e4de", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 09:02:26", "category": "Macros - Attribute Macros", "category_id": "ee88988b3fc6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 09:10:46", "category": "Macros - Function-Like Proc Macros", "category_id": "0d43462979c1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 09:26:16", "category": "Macros - The paste Crate", "category_id": "569136dfcd4b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 09:41:17", "category": "Macros - The inventory Crate", "category_id": "f61547a82173", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 09:54:08", "category": "Patterns - Type-State Pattern", "category_id": "095e7056ee06", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 10:06:49", "category": "Patterns - Newtype Pattern", "category_id": "58e33ecb62d6", "model": "gemma-4-e4b-it"}
