@@ -70,3 +70,779 @@
 {"timestamp": "2026-04-07 09:41:17", "category": "Macros - The inventory Crate", "category_id": "f61547a82173", "model": "gemma-4-e4b-it"}
 {"timestamp": "2026-04-07 09:54:08", "category": "Patterns - Type-State Pattern", "category_id": "095e7056ee06", "model": "gemma-4-e4b-it"}
 {"timestamp": "2026-04-07 10:06:49", "category": "Patterns - Newtype Pattern", "category_id": "58e33ecb62d6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 10:28:22", "category": "Patterns - Observer/Event System", "category_id": "ac4f9f6a1559", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 11:03:04", "category": "Patterns - Visitor Pattern", "category_id": "ef896739c01b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:57:16", "category": "Error Handling - miette for Rich Diagnostics", "category_id": "428e681c2602", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:57:22", "category": "Error Handling - eyre for Spantrace", "category_id": "af7c5b5b7d23", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:57:28", "category": "Strings - SmolStr and CompactString", "category_id": "04f3aa9eb186", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:57:34", "category": "Collections - SmallVec and ArrayVec", "category_id": "78e32ea32beb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:57:40", "category": "Collections - Typed Arena Allocation", "category_id": "501ed08e4234", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:57:46", "category": "IO - Temporary Files", "category_id": "29819e8d7455", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:57:53", "category": "Async - Future Trait", "category_id": "daf96c2f6e46", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:57:59", "category": "Async - async fn and await", "category_id": "ba6350a38009", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:58:05", "category": "Async - async-trait Crate", "category_id": "ebcb357d62c3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:58:11", "category": "Async - Buffered Concurrency", "category_id": "f50c55be0279", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:58:17", "category": "Terminal - Progress Bars with indicatif", "category_id": "44d3b224bb64", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:58:23", "category": "Terminal - Table Formatting with comfy-table", "category_id": "6797e16584f5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:58:29", "category": "Terminal - TUI with ratatui", "category_id": "81a2365ed7f5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:58:36", "category": "Unsafe - Raw Pointers", "category_id": "c2324ab14550", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:58:42", "category": "Unsafe - Writing Safe Abstractions", "category_id": "4cc931d7f3ea", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:58:48", "category": "Unsafe - Transmute and Reinterpretation", "category_id": "df3dab93f783", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:58:54", "category": "Unsafe - Implementing Vec from Scratch", "category_id": "1b4758b92222", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:59:00", "category": "Unsafe - Implementing a Linked List", "category_id": "af7897134322", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:59:06", "category": "Unsafe - Union Types", "category_id": "3528965bbdd4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:59:12", "category": "FFI - Calling C from Rust", "category_id": "ce8acfa61ddc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:59:19", "category": "FFI - Calling Rust from C", "category_id": "a99844761872", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:59:25", "category": "FFI - String Handling Across FFI", "category_id": "82d74e4e313f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:59:31", "category": "FFI - bindgen Workflow", "category_id": "4e82eba03736", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:59:37", "category": "FFI - Node.js Bindings with napi-rs", "category_id": "3b9b171a9133", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:59:43", "category": "Performance - SIMD with std::arch", "category_id": "df6acc43d70e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:59:49", "category": "Performance - Caching and Memoization", "category_id": "69b068217ed5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 12:59:55", "category": "Macros - Declarative macro_rules!", "category_id": "0b46b51734e9", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:00:02", "category": "Macros - Procedural Macro Setup", "category_id": "73fa7905e92a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:00:08", "category": "Macros - Custom Derive Macro", "category_id": "021129e9e4de", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:00:14", "category": "Macros - Attribute Macros", "category_id": "ee88988b3fc6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:00:20", "category": "Macros - Function-Like Proc Macros", "category_id": "0d43462979c1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:00:26", "category": "Macros - The paste Crate", "category_id": "569136dfcd4b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:00:32", "category": "Macros - The inventory Crate", "category_id": "f61547a82173", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:00:38", "category": "Patterns - Type-State Pattern", "category_id": "095e7056ee06", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:00:45", "category": "Patterns - Newtype Pattern", "category_id": "58e33ecb62d6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:00:51", "category": "Patterns - Observer/Event System", "category_id": "ac4f9f6a1559", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:00:57", "category": "Patterns - Visitor Pattern", "category_id": "ef896739c01b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:01:03", "category": "Patterns - Singleton and Global State", "category_id": "70203d07a3e2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:01:09", "category": "Patterns - Index-Based Data Structures", "category_id": "a07910f16cc0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:01:15", "category": "Patterns - Typestate for Protocol Correctness", "category_id": "e8888f27e719", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:01:21", "category": "Patterns - Parse Don't Validate", "category_id": "7d4f9fd377f4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:01:27", "category": "Testing - Unit Tests in Same File", "category_id": "2ac8b88d5e66", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:01:34", "category": "Testing - Integration Tests", "category_id": "1e65dcbcc4e5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:01:40", "category": "Testing - Property Testing with proptest", "category_id": "facfa0dbb631", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:01:46", "category": "Testing - Mocking with mockall", "category_id": "b99ad1127b2c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:01:52", "category": "Testing - Fuzzing with cargo-fuzz", "category_id": "67a4b4886c26", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:01:58", "category": "Testing - Test Helpers and Fixtures", "category_id": "6bc202e32c2c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:02:04", "category": "Testing - Code Coverage with cargo-llvm-cov", "category_id": "c56a10f6dc44", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:02:10", "category": "no_std - Bare Metal Basics", "category_id": "3e2cd98600b3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:02:16", "category": "no_std - Heap Allocation in no_std", "category_id": "5a628f2c659a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:02:22", "category": "no_std - embedded-hal Abstraction", "category_id": "937bfb5c4db4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:02:29", "category": "no_std - RTIC Framework", "category_id": "36b8f726c51c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:02:35", "category": "no_std - Defmt Logging", "category_id": "abec9038deeb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:02:41", "category": "no_std - Fixed-Point Arithmetic", "category_id": "ef16d41d6770", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:02:47", "category": "no_std - Embassy Async Embedded", "category_id": "003d06cd51d0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:02:53", "category": "Parsing - nom Combinators", "category_id": "a7223601d04d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:02:59", "category": "Parsing - winnow Modern Parser", "category_id": "ff2db93a981a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:03:05", "category": "Parsing - pest Grammar Files", "category_id": "c37e94ced507", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:03:11", "category": "Parsing - chumsky for Error Recovery", "category_id": "fec50a1c9b38", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:03:17", "category": "Parsing - Writing a Lexer by Hand", "category_id": "5d4be92deed5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:03:23", "category": "Parsing - Building an AST", "category_id": "b56382122605", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:03:30", "category": "Parsing - Pratt Parser for Expressions", "category_id": "bc9a9299523c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:03:36", "category": "Networking - UDP Sockets", "category_id": "c4cede9f5f1d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:03:42", "category": "Networking - DNS Resolution", "category_id": "429d5c10f848", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:03:48", "category": "Networking - HTTP/2 and HTTP/3", "category_id": "81b1b8652251", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:03:54", "category": "Crypto - Hashing with SHA and BLAKE3", "category_id": "f07acf20a6be", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:04:00", "category": "Crypto - HMAC and Digital Signatures", "category_id": "d589e6936c4b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:04:06", "category": "Crypto - Symmetric Encryption", "category_id": "374db996198f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:04:12", "category": "Crypto - Password Hashing", "category_id": "5544c4a40e56", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:04:18", "category": "Crypto - JWT with jsonwebtoken", "category_id": "8e98cc642184", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:04:25", "category": "Crypto - Secure Random Numbers", "category_id": "32392707210a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:04:31", "category": "Crypto - Constant-Time Comparisons", "category_id": "529c344d95a5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:04:37", "category": "Data - Polars DataFrame Operations", "category_id": "98a57c177046", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:04:43", "category": "Data - Arrow and Parquet", "category_id": "259e80c232f9", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:04:49", "category": "Data - Bloom Filters", "category_id": "770d93c8fce4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:04:55", "category": "Data - Interval Trees and Range Queries", "category_id": "1373d39cd8ed", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:05:01", "category": "Concurrency - Reader-Writer Lock Patterns", "category_id": "c0d54303ee9d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:05:07", "category": "Concurrency - Once Cell and Lazy Init", "category_id": "393e7467931d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:05:13", "category": "Type System - Phantom Types for Units", "category_id": "7cef1e3325dd", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:05:19", "category": "Type System - Session Types", "category_id": "113866961677", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:05:26", "category": "Type System - Type-Level Integers", "category_id": "bd5b706cbd26", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:05:32", "category": "Type System - Negative Impls and AutoTraits", "category_id": "243b25d55e57", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:05:38", "category": "Type System - Type Erasure", "category_id": "8596485682d9", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:05:44", "category": "Type System - Const Evaluation", "category_id": "3c8051bf25ec", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:05:50", "category": "Type System - Specialization Workarounds", "category_id": "49b6a59214ee", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:05:56", "category": "Cargo - Workspace Setup", "category_id": "c1016d201f4e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:06:02", "category": "Cargo - Features and Conditional Compilation", "category_id": "7bfc6f8233b0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:06:08", "category": "Cargo - Build Scripts (build.rs)", "category_id": "038ca23d38ba", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:06:14", "category": "Cargo - Custom Profiles", "category_id": "ce26a9350f29", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:06:21", "category": "Cargo - Publishing a Crate", "category_id": "f86ae0ff06dd", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:06:27", "category": "Cargo - Dependency Management", "category_id": "4ef611cdc4b3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:06:33", "category": "Cargo - Cross Compilation", "category_id": "3a409c2ea04b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:06:39", "category": "Advanced - CPS (Continuation Passing Style)", "category_id": "3c04e00a9b0d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:06:45", "category": "Advanced - Effect Systems Simulation", "category_id": "9f4ff8c28cd4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:06:51", "category": "Advanced - Tagless Final Encoding", "category_id": "edd36b73f554", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:06:57", "category": "Advanced - Heterogeneous Lists (HList)", "category_id": "c3f91e98eae3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:07:03", "category": "Advanced - State Machines with enumflags2", "category_id": "b8e10025ad6f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:07:09", "category": "Advanced - Compile-Time Regex", "category_id": "2744bceea7a1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:07:15", "category": "Advanced - Zero-Copy Protocol Buffers", "category_id": "bbfed16fd381", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:07:22", "category": "Advanced - Lock-Free MPSC from Scratch", "category_id": "ecbde0cb8311", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:07:28", "category": "Advanced - Arena-Backed String Interning", "category_id": "417ac77782ec", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:07:34", "category": "Advanced - HRTB in Practice", "category_id": "f0d4e43fd54b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:07:40", "category": "Advanced - Variance in Practice", "category_id": "5123c6d3ef2c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:07:46", "category": "Advanced - Intrusive Data Structures", "category_id": "05261e35d7e3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:07:52", "category": "Advanced - Copy-on-Write Arc (im crate)", "category_id": "7ed910a8a4cd", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:07:58", "category": "Advanced - Channel-Based State Machine", "category_id": "f08a4c624804", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:08:04", "category": "Advanced - Async Drop Simulation", "category_id": "3165824dbec2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:08:10", "category": "Advanced - eBPF Programs in Rust", "category_id": "70ff12d34b12", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:08:17", "category": "Advanced - CUDA via cudarc", "category_id": "76a22485f72f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:08:23", "category": "Core - Move in Match Arms", "category_id": "23b954d9ae4a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:08:29", "category": "Core - Borrow in Closures vs Move", "category_id": "b6517c277627", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:08:35", "category": "Core - Ownership in Loops", "category_id": "ab674c2b1b24", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:08:41", "category": "Core - The Borrow Checker Mental Model", "category_id": "9eb21ac66d93", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:08:47", "category": "Core - Unsized Types and DSTs", "category_id": "8a00ecf9a1f4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:08:53", "category": "Core - Place Expressions and Value Expressions", "category_id": "32a07499399e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:08:59", "category": "Lifetimes - Lifetime in Closures", "category_id": "9b3cb90ab0aa", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:09:05", "category": "Lifetimes - Lifetime Bounds on Trait Objects", "category_id": "931124257814", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:09:12", "category": "Lifetimes - Named Lifetime Parameters Best Practices", "category_id": "1884aa24c81c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:09:18", "category": "Lifetimes - Lifetime in Associated Types", "category_id": "8a9bfd89faaf", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:09:24", "category": "Traits - The Orphan Rule in Practice", "category_id": "0a0cd01ffa69", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:09:30", "category": "Traits - Negative Trait Bounds", "category_id": "533d67c1f6dd", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:09:36", "category": "Traits - impl Trait for References", "category_id": "8f40f81e7be3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:09:42", "category": "Traits - Coherence and Specialization", "category_id": "eec1284698d1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:09:48", "category": "Traits - Marker Traits and Auto Traits", "category_id": "6c56c8854ca2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:09:54", "category": "Traits - Write Trait for Output", "category_id": "96f93986eddd", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:10:00", "category": "Traits - Read Trait for Input", "category_id": "d5c86271e3b6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:10:07", "category": "Enums - Unit Variants as Tokens", "category_id": "4d18249bc4ac", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:10:13", "category": "Enums - Enum as Error Hierarchy", "category_id": "06ebd0dfa150", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:10:19", "category": "Enums - Exhaustive vs Non-Exhaustive Matching", "category_id": "8e0b4737726d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:10:25", "category": "Enums - Enum Repr for FFI", "category_id": "deb0ff926b77", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:10:31", "category": "Enums - State Machine with Enum Variants", "category_id": "4fe2ad5e1844", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:10:37", "category": "Closures - Memoizing with a Cache Closure", "category_id": "46060d9bfa3f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:10:43", "category": "Closures - Callback Registration", "category_id": "ce09c4799e56", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:10:49", "category": "Closures - Async Closures", "category_id": "9de3628aa512", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:10:55", "category": "Iterators - take_while and skip_while", "category_id": "e99bd60abef1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:11:02", "category": "Iterators - min_by_key and max_by_key", "category_id": "38a1c75d593c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:11:08", "category": "Iterators - enumerate and position", "category_id": "a0494bc9b3f8", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:11:14", "category": "Iterators - all and any", "category_id": "e440715b3847", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:11:20", "category": "Iterators - sum and product", "category_id": "b8d1046f3ace", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:11:26", "category": "Iterators - count and last", "category_id": "99d93a955614", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:11:32", "category": "Iterators - unzip", "category_id": "c23e5d05438d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:11:38", "category": "Iterators - Implementing Iterator for a Tree", "category_id": "003820f617f1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:11:44", "category": "Iterators - Generator-Style Iteration", "category_id": "71190b594f9d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:11:50", "category": "Error Handling - Error in Libraries vs Applications", "category_id": "18d3e027ebd8", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:11:56", "category": "Error Handling - Panic Hooks", "category_id": "66c7c66cedcf", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:12:03", "category": "Error Handling - Abort vs Unwind", "category_id": "61bde8a07fbe", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:12:09", "category": "Strings - AhoCorasick Multi-Pattern Search", "category_id": "ce4b11c350a2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:12:15", "category": "Strings - String Interning", "category_id": "459314f28409", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:12:21", "category": "Strings - String Difference and Edit Distance", "category_id": "d0e4faa701d2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:12:27", "category": "Strings - Encoding Conversion", "category_id": "28654be8e7c2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:12:33", "category": "Strings - Fast String Hashing", "category_id": "2b551c54f1f4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:12:39", "category": "Collections - Sorting and Deduplication", "category_id": "919c0f767219", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:12:45", "category": "Collections - Flattening Nested Collections", "category_id": "cd090566d62c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:12:51", "category": "Collections - Partition and Group Idioms", "category_id": "d67c7bb10644", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:12:58", "category": "Collections - Multimap Patterns", "category_id": "1823b4f52c5e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:13:04", "category": "Collections - Stable vs Unstable Sort", "category_id": "8cbd8670636a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:13:10", "category": "Collections - Trie Data Structure", "category_id": "11be9cd6aa8d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:13:16", "category": "Collections - Skip List Implementation", "category_id": "f52c74a67a9f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:13:22", "category": "Collections - Graph Representation", "category_id": "b95ac7d10e9b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:13:28", "category": "Collections - LRU Cache Implementation", "category_id": "c2ea4c5a5cb4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:13:34", "category": "IO - Serializing to Multiple Formats", "category_id": "2f4ee09c5cd2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:13:40", "category": "IO - Pipe and Process IO", "category_id": "5abddb24f681", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:13:46", "category": "IO - Compression IO", "category_id": "d902ec2630f7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:13:53", "category": "Async - Task Spawning Patterns", "category_id": "82d5837e90bd", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:13:59", "category": "Async - Async Trait Objects", "category_id": "bf97a71c41e3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:14:05", "category": "Async - Polling Futures Manually", "category_id": "a70ef4c164aa", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:14:11", "category": "Async - smol Runtime", "category_id": "1560e1007c9e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:14:17", "category": "Async - Pin Projection with pin-project", "category_id": "478976ff3841", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:14:23", "category": "Async - Graceful Shutdown Patterns", "category_id": "c256a4b7b901", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:14:29", "category": "Terminal - ANSI Escape Codes Manually", "category_id": "5ae3305e4414", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:14:35", "category": "Terminal - Crossterm for Cross-Platform", "category_id": "8d4130796782", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:14:42", "category": "Systems - proc-fs Reading", "category_id": "78da1df14ec1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:14:48", "category": "Systems - ptrace and Process Introspection", "category_id": "c278c8d7387d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:14:54", "category": "Systems - Shared Memory IPC", "category_id": "2a789e78fbce", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:15:00", "category": "Systems - Unix Domain Sockets", "category_id": "c02ab14caeb9", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:15:06", "category": "Systems - Signals and Signal Safety", "category_id": "52817cb82df2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:15:12", "category": "Systems - setrlimit and Resource Limits", "category_id": "351c3878faa1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:15:18", "category": "Systems - NUMA-Aware Allocation", "category_id": "e350c9c70fcd", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:15:24", "category": "Macros - The tt-muncher Pattern", "category_id": "32eb9aab887a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:15:30", "category": "Macros - Push-Down Accumulator", "category_id": "cf573ec88c4a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:15:37", "category": "Macros - Generating Tests with Macros", "category_id": "b92976f285f3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:15:43", "category": "Macros - Derive Helper Attributes", "category_id": "3c422fe7c924", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:15:49", "category": "Macros - syn and quote in Depth", "category_id": "05086bafb8ab", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:15:55", "category": "Macros - Inline Proc Macros (Macro 2.0 Style)", "category_id": "13269f552b03", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:16:01", "category": "Patterns - Fluent Interface", "category_id": "d9ad18158c07", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:16:07", "category": "Patterns - Registry and Plugin System", "category_id": "48fd2dcc5662", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:16:13", "category": "Patterns - Middleware Pipeline", "category_id": "3232e74c4e28", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:16:19", "category": "Patterns - Snapshot and Diff", "category_id": "50a3621c64d6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:16:25", "category": "Patterns - Event Sourcing", "category_id": "8f771ba17912", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:16:31", "category": "Patterns - Graceful Degradation", "category_id": "9ec0d544cf2b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:16:38", "category": "Patterns - Dependency Injection", "category_id": "2def359819ab", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:16:44", "category": "Patterns - Lazy Initialization Patterns", "category_id": "6bc2085a4442", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:16:50", "category": "Patterns - Null Object Pattern", "category_id": "93eed8277e16", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:16:56", "category": "Testing - Testing Error Cases", "category_id": "a55ce927be30", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:17:02", "category": "Testing - Database Integration Tests", "category_id": "9b4778c724e4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:17:08", "category": "Testing - Testing CLI Output", "category_id": "0f817af6b5c4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:17:14", "category": "Testing - Golden File Testing", "category_id": "d779895bf307", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:17:20", "category": "Testing - Concurrency Tests", "category_id": "3b067dfa126c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:17:26", "category": "Testing - Benchmark Comparisons", "category_id": "e107ddf427da", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:17:33", "category": "Type System - Refinement Types Simulation", "category_id": "5d7dfbc7ac93", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:17:39", "category": "Type System - Type-Level Boolean Logic", "category_id": "356c32e0bbb1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:17:45", "category": "Type System - Nat Type-Level Numbers", "category_id": "9b3581c73ad5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:17:51", "category": "Type System - Opaque Types and Encapsulation", "category_id": "53beb80d9e65", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:17:57", "category": "Type System - Marker Struct for Context", "category_id": "d788c9b1012c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:18:03", "category": "Type System - Type Witness Pattern", "category_id": "ab7c06ba22f0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:18:09", "category": "Cargo - Linking Native Libraries", "category_id": "80cfddede3b2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:18:15", "category": "Cargo - proc-macro Crate Layout", "category_id": "939e82bb4ab1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:18:21", "category": "Cargo - cargo-make and xtask", "category_id": "a584a6b7f1b5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:18:28", "category": "Cargo - Offline Builds", "category_id": "956192f4b6c4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:18:34", "category": "Cargo - Minimum Supported Rust Version", "category_id": "eda74a7939cc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:18:40", "category": "Advanced - const fn for Lookup Tables", "category_id": "f2c73fe6af37", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:18:46", "category": "Advanced - Self-Modifying Code Patterns", "category_id": "b02dcfbfa81e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:18:52", "category": "Advanced - Coroutines via Generators", "category_id": "9b38e9f010be", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:18:58", "category": "Advanced - Type-Checked Units with dimensioned", "category_id": "5d9b37b082e7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:19:04", "category": "Advanced - Memory Pools with custom GlobalAlloc", "category_id": "ac2c13528f90", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:19:10", "category": "Advanced - Compile-Time String Operations", "category_id": "80f3b4949e6c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:19:16", "category": "Advanced - Rust and Lua Integration", "category_id": "470db9851147", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:19:23", "category": "Advanced - Wren and Rhai Scripting", "category_id": "aa09a5bda8ab", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:19:29", "category": "Advanced - Custom Derive for Builders", "category_id": "9dab90fb5fd2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:19:35", "category": "Advanced - Persistent Red-Black Tree", "category_id": "c8b80cc248ae", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:19:41", "category": "Advanced - Segment Tree and Fenwick Tree", "category_id": "5d252dffd749", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:19:47", "category": "Advanced - Suffix Array Construction", "category_id": "1cb320833d33", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:19:53", "category": "Advanced - Rope Data Structure", "category_id": "cab5b798f940", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:19:59", "category": "Advanced - Persistent Data Structures", "category_id": "501755a62f59", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:20:05", "category": "Advanced - Lock-Free HashMap from Scratch", "category_id": "14ad23c71647", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:20:11", "category": "Advanced - Ranked Union-Find (DSU)", "category_id": "fe1cc9a4ff00", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:20:17", "category": "Networking - QUIC Protocol with quinn", "category_id": "e5d22093963a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:20:24", "category": "Networking - WebRTC with webrtc-rs", "category_id": "3e53d8736e0f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:20:30", "category": "Networking - SSH Client with russh", "category_id": "ead02531647c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:20:36", "category": "Networking - MQTT with rumqttc", "category_id": "f57941adfde7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:20:42", "category": "Networking - gNMI and Telemetry", "category_id": "8a3592527551", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:20:48", "category": "Networking - NAT Traversal", "category_id": "b958d8617310", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:20:54", "category": "Crypto - Zero-Knowledge Proofs", "category_id": "8c4b9146d42b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:21:00", "category": "Crypto - TLS Certificate Parsing", "category_id": "d6a573bcfed4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:21:06", "category": "Crypto - Key Derivation", "category_id": "d3eb9fe70739", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:21:12", "category": "Crypto - Threshold Signatures", "category_id": "f7274d797edf", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:21:19", "category": "Performance - Using cargo-flamegraph", "category_id": "3057f0142671", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:21:25", "category": "Performance - Cache-Friendly Data Layout", "category_id": "a2ad682f9cc9", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:21:31", "category": "Performance - Branchless Code Patterns", "category_id": "5911e0bd5ae5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:21:37", "category": "Performance - LLVM Intrinsics", "category_id": "61d4e027a019", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:21:43", "category": "Performance - Reducing Lock Contention", "category_id": "f8c8d7e9438f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:21:49", "category": "Performance - String Formatting Performance", "category_id": "9407504a34dd", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:21:55", "category": "no_std - Interrupt-Driven IO", "category_id": "6305d3dcb04a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:22:01", "category": "no_std - DMA Transfers", "category_id": "74d52cf59407", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:22:07", "category": "no_std - Display Drivers", "category_id": "7d2497d37166", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:22:14", "category": "no_std - Flash Storage", "category_id": "2eff5fab0157", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:22:20", "category": "no_std - Bootloader Development", "category_id": "72b28c86783d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:22:26", "category": "Parsing - Writing a JSON Parser from Scratch", "category_id": "8de6de5d55cc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:22:32", "category": "Parsing - Binary Protocol Parsing", "category_id": "036911c18064", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:22:38", "category": "Parsing - Writing a CSV Parser", "category_id": "88cdd87e615b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:22:44", "category": "Parsing - LALR Parser Generation", "category_id": "f5ae81cfe139", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:22:50", "category": "Data - Implementing a Mini Database", "category_id": "fd1260b6c75d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:22:56", "category": "Data - Message Queue Implementation", "category_id": "020216cb1ee3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:23:02", "category": "Data - Inverted Index", "category_id": "952b7f1bc68f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:23:08", "category": "Data - Time Series Storage", "category_id": "f58996fb1762", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:23:15", "category": "Misc - Documentation and Doc Tests", "category_id": "2d6fbae5c8d0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:23:21", "category": "Misc - Cargo.lock and Reproducibility", "category_id": "9860be7c207d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:23:27", "category": "Misc - Unsafe Code Guidelines", "category_id": "f51404188638", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:23:33", "category": "Misc - Miri for UB Detection", "category_id": "f3cfeeecc150", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:23:39", "category": "Misc - Clippy Custom Lints", "category_id": "b78be9642848", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:23:45", "category": "Misc - rustfmt Configuration", "category_id": "a1fd0045c801", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:23:51", "category": "Misc - Cargo Extensions", "category_id": "30055f413672", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:23:57", "category": "Misc - Edition Migration", "category_id": "3008008f33e3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:24:03", "category": "Misc - Monorepo Patterns", "category_id": "c9afe8b8dda4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:24:09", "category": "Misc - Rust in CI/CD", "category_id": "4db8cd17a879", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:24:16", "category": "Idioms - Using Entry API to Count", "category_id": "9a579cec98ce", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:24:22", "category": "Idioms - Collecting into String", "category_id": "ca2e2b269a64", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:24:28", "category": "Idioms - Chained Option Methods", "category_id": "0bdfebedde01", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:24:34", "category": "Idioms - Using ? in Main", "category_id": "5c33964bec27", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:24:40", "category": "Idioms - Default Trait for Init", "category_id": "7991c7fe1745", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:24:46", "category": "Idioms - Using std::mem::swap", "category_id": "c7461667379e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:24:52", "category": "Idioms - Using std::mem::replace", "category_id": "b7c4fbf29b98", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:24:58", "category": "Idioms - Using std::mem::take", "category_id": "7317391e5583", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:25:04", "category": "Idioms - Early Return Pattern", "category_id": "99de53b66bd2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:25:10", "category": "Idioms - Struct Update Syntax", "category_id": "6be55b12034c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:25:17", "category": "Idioms - Named Constructor Pattern", "category_id": "02abb7268d54", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:25:23", "category": "Idioms - Conversion Functions vs From", "category_id": "c9249e4ff0c5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:25:29", "category": "Idioms - Preferred Panic Messages", "category_id": "3d1930b14710", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:25:35", "category": "Idioms - pub(crate) and pub(super)", "category_id": "5fd8d60c9441", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:25:41", "category": "Idioms - Implementing Display for Enum", "category_id": "be2612022148", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:25:47", "category": "Idioms - Wrapping External Types", "category_id": "6724d11d3398", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:25:53", "category": "Idioms - Cfg Aliases", "category_id": "4bfae6f6dd39", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:25:59", "category": "Idioms - The Extend Pattern", "category_id": "aee6a26fb9fe", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:26:05", "category": "Idioms - Module Organization", "category_id": "de7d4bbb17fe", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:26:11", "category": "Idioms - Type-Driven API Design", "category_id": "7361700f4696", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:26:18", "category": "Closures - Storing Closures in Structs", "category_id": "cad8802dcbb7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:26:24", "category": "Closures - Closure as Configuration", "category_id": "8c5113e807bf", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:26:30", "category": "Closures - The Map Adapter Pattern", "category_id": "65268d795edf", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:26:36", "category": "Closures - Thread-Safe Closures", "category_id": "91b5314ce638", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:26:42", "category": "Iterators - Iterator Fusion", "category_id": "2cff37cc3007", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:26:48", "category": "Iterators - Converting to and from Streams", "category_id": "812a6240552d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:26:54", "category": "Iterators - Batching and Chunking", "category_id": "1e1a348effb0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:27:00", "category": "Iterators - Merge Sorted Iterators", "category_id": "6a18ae37ce3f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:27:06", "category": "Iterators - Borrowing from Iterator", "category_id": "7b6b5bff1793", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:27:13", "category": "Iterators - Cartesian Product", "category_id": "c853a789dd8e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:27:19", "category": "Iterators - Run-Length Encoding", "category_id": "9a3cb4544ed0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:27:25", "category": "Error Handling - Collecting Errors", "category_id": "31141b955d50", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:27:31", "category": "Error Handling - Error Metadata", "category_id": "f15b5695db7a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:27:37", "category": "Error Handling - Sentinel Values vs Result", "category_id": "b81797907713", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:27:43", "category": "Concurrency - Parking and Unparking Threads", "category_id": "6fa791adba1f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:27:49", "category": "Concurrency - Spinlock Implementation", "category_id": "2e3a4c98e4be", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:27:55", "category": "Concurrency - Hazard Pointers", "category_id": "4da97e0aa00a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:28:01", "category": "Concurrency - Sequence Lock", "category_id": "dc70e242f880", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:28:08", "category": "Concurrency - Broadcast-Skip Pattern", "category_id": "a09978a733d3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:28:14", "category": "Concurrency - Work Queue with Backpressure", "category_id": "8c7f9b6c81c5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:28:20", "category": "Concurrency - Thread Pool from Scratch", "category_id": "4f7c638354e2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:28:26", "category": "Async - Connection Retry and Reconnect", "category_id": "fda3fcd296ae", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:28:32", "category": "Async - Async Iterator (Stream) from Scratch", "category_id": "a80a2c2af5d0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:28:38", "category": "Async - Request Coalescing", "category_id": "63543327587e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:28:44", "category": "Async - Hedged Requests", "category_id": "2695e326f6ac", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:28:50", "category": "Async - Bulkhead Pattern", "category_id": "4ebacbbdb34a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:28:56", "category": "Terminal - REPL Implementation", "category_id": "dedbcfaad01d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:29:03", "category": "Terminal - Daemon Process", "category_id": "22bfb4491a68", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:29:09", "category": "Macros - Debug-Only Assertions", "category_id": "6bd6d22fc37d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:29:15", "category": "Macros - include_str! and include_bytes!", "category_id": "bdf627f8338d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:29:21", "category": "Macros - env! and option_env!", "category_id": "20af9c065db2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:29:27", "category": "Macros - concat! and stringify!", "category_id": "67e37a23eab2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:29:33", "category": "Macros - todo! warn! and unreachable!", "category_id": "008c9b72cadf", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:29:39", "category": "Macros - matches! Macro", "category_id": "19d775263478", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:29:45", "category": "Macros - write!/writeln! to String", "category_id": "e30d92d82cd1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:29:51", "category": "Patterns - The Peel Pattern", "category_id": "39b42522461d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:29:57", "category": "Patterns - Output Parameter via Closure", "category_id": "f66e1bdb3da8", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:30:04", "category": "Patterns - Error Context Chaining", "category_id": "c99e6749ba4d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:30:10", "category": "Patterns - Phantom Data for API Versioning", "category_id": "3c2562b67dde", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:30:16", "category": "Patterns - Recursive Data with Box", "category_id": "abfc82ec3bc0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:30:22", "category": "Patterns - Interior Mutability in Safe API", "category_id": "da3c4cd40650", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:30:28", "category": "Patterns - Resource Lifecycle with Drop", "category_id": "0129434e4e16", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:30:34", "category": "Patterns - Idempotent Operations", "category_id": "131951fc568c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:30:40", "category": "Patterns - Read-Copy-Update (RCU)", "category_id": "8ada6fa1c035", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:30:46", "category": "Testing - Randomized Testing with fastrand", "category_id": "dfc8589d9882", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:30:52", "category": "Testing - Test Sharding in CI", "category_id": "d2b4609d78fc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:30:58", "category": "Testing - Testing Macros", "category_id": "f4a559287bba", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:31:05", "category": "Testing - cargo-nextest", "category_id": "57653e69fdf1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:31:11", "category": "Testing - Mutation Testing with mutagen", "category_id": "b25a1c1f7038", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:31:17", "category": "Testing - Testing no_std Code", "category_id": "45dbf0b22623", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:31:23", "category": "Testing - Doctest Best Practices", "category_id": "271a58b3ef2b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:31:29", "category": "Type System - Newtype Index for Type-Safe IDs", "category_id": "edb84c51c33f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:31:35", "category": "Type System - Readonly via Type State", "category_id": "1bf9f727b5f7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:31:41", "category": "Type System - Implementing PartialOrd Correctly", "category_id": "fe31326ef327", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:31:47", "category": "Type System - Implementing Hash Correctly", "category_id": "b8ee298c9ed5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:31:53", "category": "Cargo - cargo-chef for Docker Caching", "category_id": "6e61984ee16b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:31:59", "category": "Cargo - Conditional Dev Dependencies", "category_id": "d10787f130ac", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:32:06", "category": "Cargo - Patch and Override", "category_id": "77495268663e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:32:12", "category": "Cargo - workspace.package Inheritance", "category_id": "86b49f78d5f4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:32:18", "category": "Advanced - Hot Code Reloading", "category_id": "f6223ce4346a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:32:24", "category": "Advanced - Differential Dataflow", "category_id": "9e2a6d90b850", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:32:30", "category": "Advanced - ABI Stability with abi_stable", "category_id": "2748a5a95935", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:32:36", "category": "Advanced - Compile-Time Feature Detection", "category_id": "917ed92c9dbc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:32:42", "category": "Advanced - Implementing a Key-Value Store", "category_id": "2028c8a35024", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:32:48", "category": "Advanced - DNS Server from Scratch", "category_id": "4d2554ed9e8b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:32:54", "category": "Advanced - HTTP/1.1 Parser from Scratch", "category_id": "75e29dae3a8a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:33:01", "category": "Advanced - Encoding a Parser Combinator Library", "category_id": "d10b05a602da", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:33:07", "category": "Advanced - Writing a Bytecode Interpreter", "category_id": "acb7b08c2156", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:33:13", "category": "Advanced - Implementing Green Threads", "category_id": "f9e5e89ab322", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:33:19", "category": "Core - Integer Overflow Behavior", "category_id": "bf6138e3dd34", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:33:25", "category": "Core - Float Handling", "category_id": "f301c5d0027f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:33:31", "category": "Core - Ranges and RangeBounds", "category_id": "289b8ddb250a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:33:37", "category": "Core - Slice Methods Reference", "category_id": "31b39fc405df", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:33:43", "category": "Core - Array vs Slice vs Vec", "category_id": "99caabf84cdb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:33:49", "category": "Core - Tuple Structs and Unit Structs", "category_id": "865905723817", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:33:55", "category": "Core - Visibility Rules in Modules", "category_id": "5c6cf9b744cb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:34:02", "category": "Core - use Declarations and Glob Imports", "category_id": "0247c787da87", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:34:08", "category": "Core - The Prelude", "category_id": "32f168269fd8", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:34:14", "category": "Core - type Keyword for Aliases", "category_id": "3f48da7227ad", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:34:20", "category": "Core - Numeric Casts with as", "category_id": "ba6fc911529c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:34:26", "category": "Core - Shadowing in Match", "category_id": "8de91e095d5f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:34:32", "category": "Core - Irrefutable Patterns", "category_id": "e1193bffdf7d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:34:38", "category": "Core - while let vs loop+break", "category_id": "8254b16de2aa", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:34:44", "category": "Core - Box<T> for Heap Allocation", "category_id": "9c746cc5b077", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:34:50", "category": "Core - std::cmp Utilities", "category_id": "d9ad429bd481", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:34:56", "category": "Core - Exhaustiveness in Match", "category_id": "b8004c56d83c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:35:03", "category": "Core - Nested Functions and Closures", "category_id": "c73b78b11671", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:35:09", "category": "Networking - ICMP Ping Implementation", "category_id": "7d4f01ea74b0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:35:15", "category": "Networking - ARP Table Reading", "category_id": "40cc083863f8", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:35:21", "category": "Networking - Packet Crafting with pnet", "category_id": "043ab18369a4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:35:27", "category": "Networking - HTTP/2 Push", "category_id": "47d9bd609d46", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:35:33", "category": "Networking - SNI Routing", "category_id": "9a1906f101df", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:35:39", "category": "Crypto - RustCrypto Trait-Based API", "category_id": "a3115a2edbde", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:35:45", "category": "Crypto - Streaming Encryption", "category_id": "7c319ff9c5fe", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:35:51", "category": "Crypto - Secure Storage of Secrets", "category_id": "a5714f47190a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:35:58", "category": "Performance - Perf Stat and Counters", "category_id": "84c16275ce1a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:36:04", "category": "Performance - Avoiding Allocations in Parsers", "category_id": "d8eb6433673b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:36:10", "category": "Misc - Writing a proc-macro Test", "category_id": "9780c34b444c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:36:16", "category": "Misc - Rust Nightly Features in Libraries", "category_id": "47d4aa8d9227", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:36:22", "category": "Misc - Semver Compatibility", "category_id": "5000b06c3d62", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:36:28", "category": "Misc - File Format Roundtrip Tests", "category_id": "4ff6e3261bd5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:36:34", "category": "Misc - Benchmarking with Bench Harness", "category_id": "28ed5e91f418", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:36:40", "category": "Misc - Documenting Unsafe Contracts", "category_id": "347238c91874", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:36:46", "category": "Misc - Deprecation Annotations", "category_id": "adbdc0fd7204", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:36:52", "category": "Misc - Exhaustive API Testing", "category_id": "4d7632444d89", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:36:59", "category": "Misc - Minimum Dependencies Philosophy", "category_id": "af12a0853f98", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:37:05", "category": "Misc - Platform-Specific Code", "category_id": "5c3b866f1a07", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:37:11", "category": "Misc - Generating Rust Code from OpenAPI", "category_id": "6e5f60ba757a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:37:17", "category": "Misc - Interop with C++ via cxx", "category_id": "127330bd0a73", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:37:23", "category": "Misc - Profiling Compile Times", "category_id": "ecb112a70221", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:37:29", "category": "Idioms - Chained Method Calls vs Let Bindings", "category_id": "2fd8b32187ba", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:37:35", "category": "Idioms - Using if let in One-Off Option Check", "category_id": "22417cc3a45c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:37:41", "category": "Idioms - Implementing a Constructor with Validation", "category_id": "aba411fdfadc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:37:47", "category": "Idioms - Pattern Matching on Multiple Values", "category_id": "a1c1a511ce54", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:37:53", "category": "Idioms - Using Iterator::position vs enumerate", "category_id": "2a5e869efe7d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:38:00", "category": "Core - The never type (!)", "category_id": "eb73bff1bdcc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:38:06", "category": "Core - Pointer-Sized Integers usize and isize", "category_id": "ac361369b201", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:38:12", "category": "Core - Byte Literals and b-Strings", "category_id": "2e9f89cfa9b1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:38:18", "category": "Core - Raw String Literals", "category_id": "50133f0e0060", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:38:24", "category": "Core - Labeled Loops and Nested Break", "category_id": "956380a1aa28", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:38:30", "category": "Traits - Index Trait for Custom Indexing", "category_id": "6cafcc8a2a1d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:38:36", "category": "Traits - Debug vs Display Best Practices", "category_id": "c15fb25b559e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:38:42", "category": "Traits - Fn Traits in Struct Fields", "category_id": "0addb54009a1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:38:48", "category": "Traits - Custom Ordering for Collections", "category_id": "1ac6fedd5475", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:38:54", "category": "Traits - Implementing Iterator Adapters as Structs", "category_id": "4fa9c518e432", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:39:01", "category": "Enums - Representing State Transitions", "category_id": "19435e25d1ed", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:39:07", "category": "Enums - Error Variants with Source", "category_id": "0534ed308872", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:39:13", "category": "Enums - Matching on References", "category_id": "bbbde98ddf91", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:39:19", "category": "Closures - Using map on Option in Chains", "category_id": "97b8621ed573", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:39:25", "category": "Closures - Closure Size and Boxing Trade-off", "category_id": "31df7925c058", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:39:31", "category": "Iterators - Buffered Iterator with Collect", "category_id": "cb35271477be", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:39:37", "category": "Iterators - min and max with Custom Comparison", "category_id": "7b2714f31fbd", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:39:43", "category": "Async - Combining Futures with futures::join!", "category_id": "326ad604d14f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:39:49", "category": "Terminal - Spinner and Throbber Animation", "category_id": "cf0679b9136b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:39:56", "category": "Macros - assert_matches! Pattern", "category_id": "b6600343cf30", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:40:02", "category": "Macros - The dbg! Macro", "category_id": "83374590dc60", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:40:08", "category": "Macros - cfg_if! for Complex Conditions", "category_id": "e49bfdbba9fe", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:40:14", "category": "Macros - Using phf for Perfect Hash", "category_id": "2be96bfcb9d4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:40:20", "category": "Patterns - Lock-Free Read with Seqlock", "category_id": "59b438bc89ee", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:40:26", "category": "Patterns - Message-Passing Object Graph", "category_id": "87c488431982", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:40:32", "category": "Patterns - Accumulator with Initial Value", "category_id": "0afc4fac7ce5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:40:38", "category": "Patterns - Invariant-Preserving API", "category_id": "d3ff9bbed7ec", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:40:44", "category": "Patterns - Separating Read and Write Concerns", "category_id": "b20e188fa793", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:40:50", "category": "Patterns - Compile-Time Dispatch Table", "category_id": "e1bdbf379b25", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:40:57", "category": "Testing - Asserting Complexity with criterion", "category_id": "ca330c96597f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:41:03", "category": "Testing - Fuzzing HTTP Parsers", "category_id": "7db448d3f628", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:41:09", "category": "Testing - Verifying Unsafe Code with Miri", "category_id": "7e71227d0f27", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:41:15", "category": "Type System - impl Trait vs Enum for Return", "category_id": "0532195b4384", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:41:21", "category": "Type System - Blanket Impl for Wrapping Types", "category_id": "7d0a46cdcbb6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:41:27", "category": "Type System - Higher-Kinded Types Simulation", "category_id": "a175d0fc71f5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:41:33", "category": "Cargo - Running Benchmarks in CI", "category_id": "fe1f6de8d182", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:41:39", "category": "Cargo - cargo-generate Project Templates", "category_id": "97b66fe03cf4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:41:45", "category": "Cargo - cargo-dist for Release Artifacts", "category_id": "0054b312a092", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:41:51", "category": "Advanced - Differential Privacy in Rust", "category_id": "184498a66559", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:41:58", "category": "Advanced - Homomorphic Encryption Basics", "category_id": "99f94c4c775b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:42:04", "category": "Advanced - Verifiable Computation", "category_id": "c3f54f517d91", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:42:10", "category": "Advanced - CRDT Implementations", "category_id": "eb6c8752fa71", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:42:16", "category": "Advanced - Persistent Segment Tree", "category_id": "86850ff3e967", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:42:22", "category": "Advanced - Memory Tagging and MTE", "category_id": "63b9977d2d43", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:42:28", "category": "Advanced - Sanitizers with cargo", "category_id": "e69232a92c2a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:42:34", "category": "Advanced - Link-Time Optimization", "category_id": "a311a13e93c7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:42:40", "category": "Advanced - Sparse Matrices and Graphs", "category_id": "7fa41fc449a7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:42:46", "category": "Advanced - Bloom Filter from Scratch", "category_id": "4fce51c02fb1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:42:52", "category": "Advanced - Consistent Hashing Ring", "category_id": "d764d3306216", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:42:59", "category": "Advanced - Merkle Tree Implementation", "category_id": "d8295531dc81", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:43:05", "category": "Advanced - Operational Transform (OT)", "category_id": "8754f4e6181a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:43:11", "category": "Advanced - GPU Compute with wgpu", "category_id": "cedd86772bfc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:43:17", "category": "Advanced - Metal and Vulkan Bindings", "category_id": "49f4ebf728a1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:43:23", "category": "Advanced - Implementing a Regex Engine", "category_id": "43837e0e4110", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:43:29", "category": "Advanced - Implementing a Garbage Collector", "category_id": "745863ef73cd", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:43:35", "category": "Advanced - Implementing RAFT Consensus", "category_id": "d4cfed77da95", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:43:41", "category": "Advanced - Implementing Paxos", "category_id": "8f40f139fd89", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:43:47", "category": "Advanced - High-Performance Logging", "category_id": "22a8fed8abb4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:43:54", "category": "Advanced - Custom Memory Layouts for Cache", "category_id": "55c3bc16acc9", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:44:00", "category": "Advanced - Instruction-Level Parallelism", "category_id": "9705bd20d45c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:44:06", "category": "Advanced - Portable SIMD (std::simd)", "category_id": "d526d2b003f2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:44:12", "category": "Advanced - Writing a Language Server", "category_id": "82a40df17d06", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:44:18", "category": "Advanced - Tree-sitter Bindings", "category_id": "e459eb6c33af", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:44:24", "category": "Advanced - Building a Plugin System", "category_id": "dd51b6403bbb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:44:30", "category": "Advanced - FUSE Filesystem", "category_id": "d075266550dd", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:44:36", "category": "Advanced - eBPF Maps and Ring Buffers", "category_id": "7f79d6f47e7a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:44:42", "category": "Advanced - Netlink Sockets", "category_id": "4338532595f6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:44:48", "category": "Advanced - Implementing a Shell", "category_id": "ebf1f1c80a8f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:44:55", "category": "Advanced - Writing a Text Editor", "category_id": "5738d237c31b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:45:01", "category": "Advanced - Implementing a Debugger", "category_id": "b008e3383f29", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:45:07", "category": "Advanced - JIT Compilation with Cranelift", "category_id": "fc85c298a009", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:45:13", "category": "Core - NonZero Integer Types", "category_id": "876bc3c4ed1e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:45:19", "category": "Core - Wrapping Arithmetic Types", "category_id": "2061927640ff", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:45:25", "category": "Core - Saturating Arithmetic", "category_id": "8f02c35e1868", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:45:31", "category": "Core - Converting Between Numeric Types", "category_id": "92173ac312cc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:45:37", "category": "Core - Inline Functions and Attributes", "category_id": "b8e4a8ec4312", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:45:43", "category": "Core - Cold and Likely Hints", "category_id": "97ef82135bce", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:45:49", "category": "Core - Static Variables", "category_id": "3769eb75f72a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:45:56", "category": "Core - Associated Constants", "category_id": "7be1c3281859", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:46:02", "category": "Traits - The Borrow Trait", "category_id": "e4a39d3a057a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:46:08", "category": "Traits - The ToOwned Trait", "category_id": "20b0f9b0b239", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:46:14", "category": "Traits - The Any Trait", "category_id": "34589b5e227d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:46:20", "category": "Traits - Implementing a Numeric Trait", "category_id": "18fcfff3418f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:46:26", "category": "Async - Async Drop via spawn", "category_id": "ee72abd8e549", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:46:32", "category": "Async - JoinSet for Dynamic Task Sets", "category_id": "40ad903f15ba", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:46:38", "category": "Async - Pinning to Stack with pin!", "category_id": "521f2d7ff189", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:46:44", "category": "Networking - Multicast UDP", "category_id": "e13079eafc34", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:46:50", "category": "Performance - Reducing Dynamic Dispatch", "category_id": "6e2b0e0b535b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:46:57", "category": "Performance - Avoiding Box in Return Types", "category_id": "0db5a9695979", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:47:03", "category": "Macros - The vec! Macro Internals", "category_id": "a15f54b3478f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:47:09", "category": "Macros - Recursive Macro Accumulator", "category_id": "e80fc3a0e89a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:47:15", "category": "Macros - The std::format_args! Macro", "category_id": "dde6f6a5ecc9", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:47:21", "category": "Patterns - The Partiality Pattern", "category_id": "62b20564933f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:47:27", "category": "Patterns - Composition over Inheritance", "category_id": "08ebc6825a15", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:47:33", "category": "Patterns - The Process Pattern", "category_id": "b8ab69c8490d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:47:39", "category": "Patterns - Error-Tolerant Parsing", "category_id": "a6315753dd4f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:47:45", "category": "Testing - Table-Driven Tests", "category_id": "a34b875adb67", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:47:51", "category": "Testing - Testing with Arbitrary Impls", "category_id": "1aabaf627008", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:47:58", "category": "Testing - Benchmark Micro vs Macro", "category_id": "7713007afb66", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:48:04", "category": "Advanced - Implementing a Futures Executor", "category_id": "e2a11f2bfd5b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:48:10", "category": "Advanced - Lock-Free Stack with Hazard Pointers", "category_id": "1bf62815e0b3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:48:16", "category": "Advanced - Trampoline for Stack Safety", "category_id": "c91404acc70f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:48:22", "category": "Advanced - Type-Safe Builder with Const Generics", "category_id": "68705d46ea4e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:48:28", "category": "Advanced - Encoding Permissions in Types", "category_id": "b4dc91e5a3a7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:48:34", "category": "Advanced - Niche Optimization Deep Dive", "category_id": "a6d7fd8990f8", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:48:40", "category": "Advanced - Stack Allocation with alloca", "category_id": "8f145208000a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:48:46", "category": "Advanced - Wait-Free Algorithms", "category_id": "38ada6498e7f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:48:52", "category": "Advanced - Formal Verification with Creusot", "category_id": "15b6688651c9", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:48:59", "category": "Advanced - KANI Model Checker", "category_id": "7e9aa16336e0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:49:05", "category": "Advanced - Rust for OS Kernel Modules", "category_id": "91f9f1228186", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:49:11", "category": "Proc-Macro - Derive Macro from Scratch", "category_id": "74642c5096be", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:49:17", "category": "Proc-Macro - Attribute Macro from Scratch", "category_id": "770c1896e94b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:49:23", "category": "Proc-Macro - Function-Like Proc Macro", "category_id": "fa11ff98a5cd", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:49:29", "category": "Proc-Macro - Parsing Input with syn", "category_id": "e0172c887755", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:49:35", "category": "Proc-Macro - Code Generation with quote", "category_id": "1b201900e4c8", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:49:41", "category": "Proc-Macro - Span and Hygiene", "category_id": "d23f06e72b78", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:49:47", "category": "Proc-Macro - Custom Helper Attributes in Derive", "category_id": "ae99dbc815a3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:49:54", "category": "Proc-Macro - Error Reporting", "category_id": "625624562be6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:50:00", "category": "Build - build.rs Basics", "category_id": "602e12859e45", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:50:06", "category": "Build - Code Generation in build.rs", "category_id": "557e84be573b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:50:12", "category": "Build - bindgen for C Bindings", "category_id": "b115e0c58828", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:50:18", "category": "Build - cbindgen for Exporting Rust to C", "category_id": "f02291ee53e6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:50:24", "category": "Build - cargo-xtask Pattern", "category_id": "16db90d71f70", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:50:30", "category": "Build - Embedding Build Metadata", "category_id": "0a9e4e85384e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:50:36", "category": "Build - Cross-Platform Linker Flags in build.rs", "category_id": "77695b3e6dd7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:50:42", "category": "Compiler Errors - E0502 Simultaneous Mutable and Immutable Borrow", "category_id": "077ebe440c29", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:50:48", "category": "Compiler Errors - E0505 Move out of Borrowed Value", "category_id": "f2f008a2d4d3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:50:55", "category": "Compiler Errors - E0507 Move out of Shared Reference", "category_id": "d63792a059a0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:51:01", "category": "Compiler Errors - E0515 Returning Reference to Local", "category_id": "807b842d1ada", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:51:07", "category": "Compiler Errors - E0597 Does Not Live Long Enough", "category_id": "89c69311206d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:51:13", "category": "Compiler Errors - E0716 Temporary Dropped While Borrowed", "category_id": "2c2f695227e1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:51:19", "category": "Compiler Errors - E0277 Trait Bound Not Satisfied", "category_id": "83f5b1eb4bbb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:51:25", "category": "Compiler Errors - E0308 Mismatched Types", "category_id": "da1fd0139d1b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:51:31", "category": "Compiler Errors - E0382 Use of Moved Value", "category_id": "74950a2b1cb2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:51:37", "category": "Compiler Errors - Decoding Multi-Error Lifetime Diagnostics", "category_id": "fcdd60d7f393", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:51:43", "category": "Embedded - no_std with the alloc Crate", "category_id": "c1ff27e6352a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:51:50", "category": "Embedded - defmt Logging", "category_id": "87855f14195b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:51:56", "category": "Embedded - RTIC Framework", "category_id": "b91b3cd6cc73", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:52:02", "category": "Embedded - Linker Scripts and Memory Maps", "category_id": "28b691ca649d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:52:08", "category": "Embedded - embedded-hal Trait Abstractions", "category_id": "3983e8f1bca7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:52:14", "category": "Embedded - probe-rs and cargo-embed", "category_id": "fd59c7d7ab18", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:52:20", "category": "Embedded - Panic Handlers in no_std", "category_id": "e54d87288290", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:52:26", "category": "Language - Generic Associated Types (GATs)", "category_id": "cea6efacc0fc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:52:32", "category": "Language - Type Alias Impl Trait (TAIT)", "category_id": "5788a20091f7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:52:38", "category": "Language - async fn in Traits (Stable)", "category_id": "17581bb8969e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:52:44", "category": "Language - Specialization (Nightly)", "category_id": "b63adef5412f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:52:51", "category": "Language - Negative Impls and Auto Traits", "category_id": "27e237ac494b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:52:57", "category": "Language - Coroutines and gen! Blocks (Nightly)", "category_id": "d1aca39053ba", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:53:03", "category": "Language - const fn and Compile-Time Evaluation", "category_id": "42418ac650d7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:53:09", "category": "Language - Advanced Const Generics", "category_id": "13ded7d4a26f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:53:15", "category": "Language - let-else Statements", "category_id": "1d24653a2277", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:53:21", "category": "Language - Orphan Rule Workarounds", "category_id": "adf26c31cacb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:53:27", "category": "Systems - Inline Assembly with asm!", "category_id": "09ab6fad953b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:53:33", "category": "Systems - SIMD with std::arch", "category_id": "033187da8d11", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:53:39", "category": "Systems - Portable SIMD (std::simd)", "category_id": "1891ef45f2c5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:53:46", "category": "Systems - Custom Global Allocator", "category_id": "828a4730b234", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:53:52", "category": "Systems - Allocator API (Nightly)", "category_id": "c2a6fcccb00c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:53:58", "category": "Systems - Memory Mapping with memmap2", "category_id": "a88613ba72d8", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:54:04", "category": "Toolchain - Profile-Guided Optimization (PGO)", "category_id": "a444012b60d5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:54:10", "category": "Toolchain - Link-Time Optimization (LTO)", "category_id": "98efbe9770d6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:54:16", "category": "Toolchain - Cross Compilation with cross", "category_id": "a6be77b58ccb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:54:22", "category": "Toolchain - Address Sanitizer (ASan)", "category_id": "3d135b8067e6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:54:28", "category": "Toolchain - Thread Sanitizer (TSan)", "category_id": "ff9500576e3d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:54:34", "category": "Toolchain - cargo-fuzz and libFuzzer", "category_id": "e3dc32869922", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:54:40", "category": "Toolchain - AFL++ Fuzzing with afl.rs", "category_id": "2a038b87fd78", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:54:47", "category": "Cargo - Feature Flags Deep Dive", "category_id": "b2cfca49a091", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:54:53", "category": "Cargo - Optional Dependencies as Features", "category_id": "55fc2eaba804", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:54:59", "category": "Cargo - Custom Build Profiles", "category_id": "7bd19536d360", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:55:05", "category": "Cargo - cargo-deny for Supply Chain Security", "category_id": "125854b562a8", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:55:11", "category": "Cargo - Publishing to crates.io", "category_id": "a6d98cd3934c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:55:17", "category": "Cargo - Artifact Dependencies", "category_id": "ec62660b828b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:55:23", "category": "Misc - Rust 2024 Edition Changes", "category_id": "c6b3d62e1d61", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:55:29", "category": "Misc - std::sync::LazyLock and OnceLock", "category_id": "24608f8da503", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:55:35", "category": "Misc - thread_local! and LocalKey", "category_id": "9d1274b44cce", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:55:42", "category": "Testing - Snapshot Testing with insta", "category_id": "5e7c847ca9d6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:55:48", "category": "Testing - Loom for Concurrent Code", "category_id": "d558e514fd63", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:55:54", "category": "Testing - Compile-Fail Tests with trybuild", "category_id": "3928f354d003", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:56:00", "category": "Patterns - Defunctionalization", "category_id": "e2294a3b2270", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:56:06", "category": "Patterns - CPS Transformation", "category_id": "8722e84ac1cc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:56:12", "category": "Patterns - Free Monad Pattern", "category_id": "0ffd7108506f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:56:18", "category": "Patterns - The Witness Pattern", "category_id": "e97325ce2aeb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:56:24", "category": "Patterns - Index-Based Graph and Tree", "category_id": "257aaf95d14c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:56:30", "category": "Patterns - The Funnel Pattern", "category_id": "ebd78f12eed6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:56:36", "category": "Misc - Incremental Compilation and sccache", "category_id": "15b1d667f5f0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:56:43", "category": "Misc - Cranelift Codegen Backend", "category_id": "2cff5900a3e1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:56:49", "category": "Misc - Reading and Writing proc-macro2 TokenStreams", "category_id": "d0a22d260747", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:56:55", "category": "Misc - cargo-semver-checks", "category_id": "0db29432a960", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:57:01", "category": "Collections - HashMap Entry API", "category_id": "42b8eaa59c84", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:57:07", "category": "Collections - HashMap Capacity and Rehashing", "category_id": "5d83b0e10840", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:57:13", "category": "Collections - BTreeMap Range Queries", "category_id": "aab72f09ed7c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:57:19", "category": "Collections - VecDeque Ring Buffer Operations", "category_id": "040fbbf5d2de", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:57:25", "category": "Collections - BinaryHeap and Priority Queues", "category_id": "3afc9c1a0da8", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:57:31", "category": "Collections - HashSet Set Operations", "category_id": "4f55cd9bd1e1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:57:38", "category": "Collections - BTreeSet Range and Split", "category_id": "38b87e658f2b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:57:44", "category": "Collections - Vec retain and dedup", "category_id": "ba8260a21d43", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:57:50", "category": "Collections - Vec drain and splice", "category_id": "33e3ec158966", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:57:56", "category": "Collections - LinkedList Cursor API", "category_id": "9ef292290383", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:58:02", "category": "Strings - str Search and Matching Methods", "category_id": "2195a5eb58ff", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:58:08", "category": "Strings - str Splitting and Tokenizing", "category_id": "7232bde5734d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:58:14", "category": "Strings - str Trimming and Stripping", "category_id": "5143ed16b988", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:58:20", "category": "Strings - String Growth and In-Place Mutation", "category_id": "0c70b1fae720", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:58:26", "category": "Strings - UTF-8 Validation and Conversion", "category_id": "278baa71fea1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:58:32", "category": "Strings - chars() and char_indices()", "category_id": "0cf1645a915e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:58:39", "category": "Strings - Byte-Level str Operations", "category_id": "25e8537e9ba4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:58:45", "category": "Strings - String Internals: Capacity, Length, and into_bytes", "category_id": "6aa6e8e9d0f9", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:58:51", "category": "Strings - char Methods and Unicode Properties", "category_id": "71a2d0081a23", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:58:57", "category": "Strings - String Replacement and Case Conversion", "category_id": "88ceaf396492", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:59:03", "category": "Iterators - scan for Stateful Transformation", "category_id": "95245122f2e6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:59:09", "category": "Iterators - flat_map vs flatten", "category_id": "f0ddfc9862f6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:59:15", "category": "Iterators - Peekable and Lookahead Parsing", "category_id": "21200c4f0247", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:59:21", "category": "Iterators - zip, unzip, and Paired Iteration", "category_id": "4096a34ad790", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:59:27", "category": "Iterators - partition and group_by (std)", "category_id": "1e2d750ce951", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:59:34", "category": "Iterators - fold vs reduce and Aggregation", "category_id": "77c97ede5488", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:59:40", "category": "Iterators - chain and Concatenating Sources", "category_id": "7750e773d8d2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:59:46", "category": "Iterators - take_while, skip_while, and span", "category_id": "8d220ce9a6d8", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:59:52", "category": "Iterators - step_by and Range Arithmetic", "category_id": "2fe2479136a8", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 13:59:58", "category": "Iterators - windows and chunks on Slices", "category_id": "ba60cc485532", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:00:04", "category": "Iterators - DoubleEndedIterator and rev()", "category_id": "d190c4fc64d9", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:00:10", "category": "Iterators - ExactSizeIterator and size_hint", "category_id": "b0202df27b0b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:00:16", "category": "Iterators - collect Into Multiple Target Types", "category_id": "94a60cb980af", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:00:22", "category": "Iterators - Implementing a Custom Iterator", "category_id": "72ab0f6f65b1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:00:28", "category": "Iterators - IntoIterator and for Loop Desugaring", "category_id": "f020a65f8f6e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:00:35", "category": "Numeric - Wrapping Arithmetic", "category_id": "57e0c9d05da5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:00:41", "category": "Numeric - Saturating Arithmetic", "category_id": "76dc5e80a43e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:00:47", "category": "Numeric - Checked Arithmetic and Overflow Detection", "category_id": "663ed1b9647b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:00:53", "category": "Numeric - Integer Bit Manipulation Methods", "category_id": "3dcfbad389cf", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:00:59", "category": "Numeric - f32/f64 Special Values and Predicates", "category_id": "46b0f7b3737b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:01:05", "category": "Numeric - Float Comparison and total_cmp", "category_id": "1abeba2381ca", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:01:11", "category": "Numeric - Euclidean Division and Remainder", "category_id": "658ab217f0a3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:01:17", "category": "Numeric - Numeric Parsing from Strings", "category_id": "50974e164e53", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:01:23", "category": "Numeric - Float Math Methods", "category_id": "29273e2c5972", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:01:29", "category": "Numeric - as Casts and Truncation Semantics", "category_id": "98fee05431d0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:01:36", "category": "Numeric - MIN, MAX, and Integer Constants", "category_id": "fec0aa493013", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:01:42", "category": "Numeric - From and TryFrom Between Integer Types", "category_id": "5df82f84741b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:01:48", "category": "Memory - size_of and align_of at Compile Time", "category_id": "166da1894794", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:01:54", "category": "Memory - mem::swap, replace, and take", "category_id": "d6b83a938ef5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:02:00", "category": "Memory - transmute Safety Rules and Alternatives", "category_id": "82ad4b66b7fb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:02:06", "category": "Memory - ptr::read, write, and copy", "category_id": "6f8c0b7ba3b3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:02:12", "category": "Memory - Null Pointers and ptr::null", "category_id": "df5d495cff43", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:02:18", "category": "Memory - NonNull<T> Pointer Wrapper", "category_id": "4c2cfaba1bbb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:02:24", "category": "Memory - slice::from_raw_parts Safety", "category_id": "cdeb16b47819", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:02:30", "category": "Memory - Pointer Arithmetic with offset and add", "category_id": "3b226523f54b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:02:37", "category": "Memory - addr_of! and addr_of_mut! Macros", "category_id": "cc436b508907", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:02:43", "category": "Memory - MaybeUninit Initialization Patterns", "category_id": "d9dba34e77e7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:02:49", "category": "Memory - Box::into_raw and Box::from_raw", "category_id": "5a7e6bf946ee", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:02:55", "category": "Memory - Global Allocator and GlobalAlloc Trait", "category_id": "f434f490d7b8", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:03:01", "category": "Memory - mem::offset_of! Macro", "category_id": "238f4dbebc35", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:03:07", "category": "Memory - Fat Pointers and Pointer Metadata", "category_id": "3297f76c1709", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:03:13", "category": "Memory - Pointer Provenance Model", "category_id": "e573058c662a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:03:19", "category": "Memory - alloc::alloc Direct Usage", "category_id": "2ea6e2304910", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:03:25", "category": "Memory - Stack vs Heap and Box Internals", "category_id": "95267651379f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:03:32", "category": "Memory - Zeroed Memory and Validity", "category_id": "41dd39fd7207", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:03:38", "category": "Memory - Copy Types and memcpy Semantics", "category_id": "ab00fc1587b4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:03:44", "category": "Memory - ptr::drop_in_place and Dropping Manually", "category_id": "98ea400f360f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:03:50", "category": "Traits - Default Trait and Derived vs Manual Impls", "category_id": "bf94aa4a9f7f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:03:56", "category": "Traits - Hash Trait and Custom Implementations", "category_id": "a1783fc42f42", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:04:02", "category": "Traits - PartialEq vs Eq Distinction", "category_id": "b4fa78a18c9f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:04:08", "category": "Traits - PartialOrd vs Ord and Derived Ordering", "category_id": "f6296881447f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:04:14", "category": "Traits - Display and Debug Formatting", "category_id": "b8eab48a51a0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:04:20", "category": "Traits - From, Into, and the Orphan Rule", "category_id": "d133120c18cb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:04:26", "category": "Traits - TryFrom and TryInto with Error Types", "category_id": "5407eeb4d636", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:04:33", "category": "Traits - AsRef and AsMut for Flexible Parameters", "category_id": "47acef5cd979", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:04:39", "category": "Traits - Borrow and BorrowMut for Collections", "category_id": "6563e1c800b9", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:04:45", "category": "Traits - Index and IndexMut Operator Overloading", "category_id": "77fd4f07ef3a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:04:51", "category": "Traits - Deref and DerefMut Coercion Chains", "category_id": "0e8260838466", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:04:57", "category": "Traits - Arithmetic Operator Traits", "category_id": "9156d76962bb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:05:03", "category": "Traits - Unary and Bitwise Operator Traits", "category_id": "e212878a6c42", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:05:09", "category": "Traits - Iterator as a Trait Object", "category_id": "69831a4180f5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:05:15", "category": "Traits - Write Trait for Buffered Output", "category_id": "62829af36beb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:05:21", "category": "Error Handling - std::error::Error Trait", "category_id": "04ff64e228bc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:05:28", "category": "Error Handling - Error Source Chaining", "category_id": "352c182dd897", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:05:34", "category": "Error Handling - Box<dyn Error> vs Typed Errors", "category_id": "7abc37bbfc93", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:05:40", "category": "Error Handling - Custom Error Enums with Display", "category_id": "24cf2fb7318c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:05:46", "category": "Error Handling - std::io::Error and ErrorKind", "category_id": "71bbf41f8f94", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:05:52", "category": "Error Handling - Result Combinators", "category_id": "6fc70ab479eb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:05:58", "category": "Error Handling - Option Combinators", "category_id": "656afe5379ff", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:06:04", "category": "Error Handling - std::backtrace::Backtrace", "category_id": "84e8bed0cd7b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:06:10", "category": "IO - BufReader and fill_buf Internals", "category_id": "d0b948f41724", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:06:16", "category": "IO - BufWriter Flush Semantics", "category_id": "d80c11180f4d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:06:23", "category": "IO - Read::read_exact and Short Reads", "category_id": "599c9e04fbfe", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:06:29", "category": "IO - BufRead Lines and Split Iterators", "category_id": "5b74574910d4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:06:35", "category": "IO - Write::write_all and Partial Writes", "category_id": "7f06a7e6faf1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:06:41", "category": "IO - Seek Trait and SeekFrom Variants", "category_id": "6509803aa6e7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:06:47", "category": "IO - Cursor<Vec<u8>> as In-Memory IO", "category_id": "b9dfa66507b7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:06:53", "category": "IO - Read Adaptors: chain and take", "category_id": "1b3059f809fb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:06:59", "category": "IO - File Open Modes and OpenOptions", "category_id": "8be62ea99691", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:07:05", "category": "IO - File Metadata and Permissions", "category_id": "383a55168c89", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:07:11", "category": "IO - fs::read, write, and read_to_string Convenience", "category_id": "86f5633019ef", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:07:17", "category": "IO - Directory Operations", "category_id": "bbd0f5a8f88e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:07:24", "category": "IO - Path and PathBuf Manipulation", "category_id": "74f9b8b19d3c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:07:30", "category": "IO - OsStr and OsString for Platform Paths", "category_id": "4e12bb343537", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:07:36", "category": "IO - stdin, stdout, stderr and Locking", "category_id": "17aeea57607a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:07:42", "category": "Concurrency - Thread Builder: Name and Stack Size", "category_id": "4050ae5d9bf6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:07:48", "category": "Concurrency - Mutex Poisoning and lock()", "category_id": "00ed27a11f90", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:07:54", "category": "Concurrency - RwLock Read/Write Patterns", "category_id": "1272c2e80fa1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:08:00", "category": "Concurrency - Condvar Wait and Notify", "category_id": "41e14b72d1a1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:08:06", "category": "Concurrency - Barrier for Thread Rendezvous", "category_id": "3212b3a8fd6e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:08:12", "category": "Concurrency - Once and One-Time Initialization", "category_id": "5246553c8cb7", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:08:19", "category": "Concurrency - mpsc Channels and Message Passing", "category_id": "d4e56865c110", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:08:25", "category": "Concurrency - sync_channel Backpressure", "category_id": "11ca75051831", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:08:31", "category": "Concurrency - Thread Park and Unpark", "category_id": "e430998b337f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:08:37", "category": "Concurrency - Send and Sync Auto-Traits", "category_id": "391b66401e96", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:08:43", "category": "Concurrency - JoinHandle and Thread Panic Propagation", "category_id": "81e8151f9c20", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:08:49", "category": "Concurrency - thread_local! Storage", "category_id": "be2eae5b4cd0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:08:55", "category": "Concurrency - Sharing State with Arc<Mutex<T>>", "category_id": "7b2bbd4e71f6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:09:01", "category": "Concurrency - try_lock and Non-Blocking Locking", "category_id": "86e62cb1fa31", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:09:07", "category": "Atomics - AtomicBool Load and Store", "category_id": "6579b06c5289", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:09:14", "category": "Atomics - AtomicUsize Fetch-and-Modify Operations", "category_id": "9769e70ab243", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:09:20", "category": "Atomics - Memory Ordering: Relaxed, Acquire, Release", "category_id": "296301b77277", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:09:26", "category": "Atomics - compare_exchange and CAS Loops", "category_id": "74a9cff60b65", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:09:32", "category": "Atomics - fetch_and, fetch_or, and fetch_xor", "category_id": "fb009c8e9405", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:09:38", "category": "Atomics - Fences: atomic::fence and compiler_fence", "category_id": "3b7741548cfc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:09:44", "category": "Atomics - Implementing a Spinlock with AtomicBool", "category_id": "118cda3ac4ed", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:09:50", "category": "Atomics - AtomicPtr and Safe Patterns", "category_id": "f4c0a58d4847", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:09:56", "category": "Formatting - Implementing fmt::Display", "category_id": "da18e9031004", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:10:02", "category": "Formatting - Implementing fmt::Debug Manually", "category_id": "cda15011e33c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:10:09", "category": "Formatting - Width, Precision, and Fill/Align", "category_id": "11bee0a17fe4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:21:07", "category": "Error Handling - miette for Rich Diagnostics", "category_id": "428e681c2602", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:27:56", "category": "Error Handling - eyre for Spantrace", "category_id": "af7c5b5b7d23", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:32:40", "category": "Strings - SmolStr and CompactString", "category_id": "04f3aa9eb186", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:40:34", "category": "Collections - SmallVec and ArrayVec", "category_id": "78e32ea32beb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 14:47:21", "category": "Collections - Typed Arena Allocation", "category_id": "501ed08e4234", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 15:06:30", "category": "Async - async-trait Crate", "category_id": "ebcb357d62c3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 15:20:34", "category": "Async - Buffered Concurrency", "category_id": "f50c55be0279", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 15:26:35", "category": "Terminal - Progress Bars with indicatif", "category_id": "44d3b224bb64", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 15:32:53", "category": "Terminal - Table Formatting with comfy-table", "category_id": "6797e16584f5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 15:48:03", "category": "Terminal - TUI with ratatui", "category_id": "81a2365ed7f5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 16:00:21", "category": "Unsafe - Raw Pointers", "category_id": "c2324ab14550", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 16:25:52", "category": "Unsafe - Implementing Vec from Scratch", "category_id": "1b4758b92222", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 16:33:38", "category": "Unsafe - Implementing a Linked List", "category_id": "af7897134322", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 16:45:20", "category": "Unsafe - Union Types", "category_id": "3528965bbdd4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 16:52:14", "category": "FFI - Calling C from Rust", "category_id": "ce8acfa61ddc", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 17:02:32", "category": "FFI - String Handling Across FFI", "category_id": "82d74e4e313f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 23:42:51", "category": "Error Handling - miette for Rich Diagnostics", "category_id": "428e681c2602", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 23:51:04", "category": "Strings - SmolStr and CompactString", "category_id": "04f3aa9eb186", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-07 23:59:14", "category": "Collections - SmallVec and ArrayVec", "category_id": "78e32ea32beb", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 00:08:00", "category": "Collections - Typed Arena Allocation", "category_id": "501ed08e4234", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 00:11:51", "category": "Async - async-trait Crate", "category_id": "ebcb357d62c3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 00:25:45", "category": "Terminal - Progress Bars with indicatif", "category_id": "44d3b224bb64", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 00:34:26", "category": "Terminal - Table Formatting with comfy-table", "category_id": "6797e16584f5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 00:50:26", "category": "Terminal - TUI with ratatui", "category_id": "81a2365ed7f5", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 01:05:39", "category": "Unsafe - Implementing a Linked List", "category_id": "af7897134322", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 01:12:26", "category": "Unsafe - Union Types", "category_id": "3528965bbdd4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 01:21:42", "category": "FFI - String Handling Across FFI", "category_id": "82d74e4e313f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 01:42:14", "category": "Performance - SIMD with std::arch", "category_id": "df6acc43d70e", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 01:49:57", "category": "Macros - Declarative macro_rules!", "category_id": "0b46b51734e9", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 02:01:40", "category": "Macros - Procedural Macro Setup", "category_id": "73fa7905e92a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 02:21:22", "category": "Macros - Attribute Macros", "category_id": "ee88988b3fc6", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 02:32:16", "category": "Macros - Function-Like Proc Macros", "category_id": "0d43462979c1", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 02:36:57", "category": "Macros - The paste Crate", "category_id": "569136dfcd4b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 03:30:24", "category": "Patterns - Singleton and Global State", "category_id": "70203d07a3e2", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 03:37:47", "category": "Patterns - Index-Based Data Structures", "category_id": "a07910f16cc0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 03:53:21", "category": "Patterns - Typestate for Protocol Correctness", "category_id": "e8888f27e719", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 04:45:43", "category": "Testing - Mocking with mockall", "category_id": "b99ad1127b2c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 05:15:54", "category": "no_std - Bare Metal Basics", "category_id": "3e2cd98600b3", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 05:24:41", "category": "no_std - Heap Allocation in no_std", "category_id": "5a628f2c659a", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 05:30:46", "category": "no_std - embedded-hal Abstraction", "category_id": "937bfb5c4db4", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 05:39:57", "category": "no_std - RTIC Framework", "category_id": "36b8f726c51c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 06:15:20", "category": "no_std - Embassy Async Embedded", "category_id": "003d06cd51d0", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 06:20:22", "category": "Parsing - nom Combinators", "category_id": "a7223601d04d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 06:40:33", "category": "Parsing - pest Grammar Files", "category_id": "c37e94ced507", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 06:56:36", "category": "Parsing - chumsky for Error Recovery", "category_id": "fec50a1c9b38", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 07:12:07", "category": "Parsing - Building an AST", "category_id": "b56382122605", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 07:24:17", "category": "Parsing - Pratt Parser for Expressions", "category_id": "bc9a9299523c", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 07:36:16", "category": "Networking - UDP Sockets", "category_id": "c4cede9f5f1d", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 07:44:19", "category": "Networking - DNS Resolution", "category_id": "429d5c10f848", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 07:49:41", "category": "Networking - HTTP/2 and HTTP/3", "category_id": "81b1b8652251", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 07:56:43", "category": "Crypto - Hashing with SHA and BLAKE3", "category_id": "f07acf20a6be", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 08:01:37", "category": "Crypto - HMAC and Digital Signatures", "category_id": "d589e6936c4b", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 08:09:17", "category": "Crypto - Symmetric Encryption", "category_id": "374db996198f", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 08:13:05", "category": "Crypto - Password Hashing", "category_id": "5544c4a40e56", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 08:24:24", "category": "Crypto - JWT with jsonwebtoken", "category_id": "8e98cc642184", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 08:44:34", "category": "Data - Polars DataFrame Operations", "category_id": "98a57c177046", "model": "gemma-4-e4b-it"}
+{"timestamp": "2026-04-08 09:18:35", "category": "Data - Interval Trees and Range Queries", "category_id": "1373d39cd8ed", "model": "gemma-4-e4b-it"}
